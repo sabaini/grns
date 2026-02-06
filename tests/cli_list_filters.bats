@@ -67,3 +67,12 @@ load 'helpers.bash'
   echo "$ids" | grep -q "$open_id"
   echo "$ids" | grep -q "$closed_id"
 }
+
+@test "list supports offset without limit" {
+  seed_db "$GRNS_TEST_DATA_DIR/seed.jsonl"
+
+  run "$GRNS_BIN" list --offset 1 --json
+  [ "$status" -eq 0 ]
+  count="$(printf '%s' "$output" | json_array_len)"
+  [ "$count" -eq 2 ]
+}

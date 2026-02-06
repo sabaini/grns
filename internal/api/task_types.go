@@ -24,17 +24,17 @@ type TaskCreateRequest struct {
 
 // TaskUpdateRequest defines the payload for updating a task.
 type TaskUpdateRequest struct {
-	Title              *string `json:"title,omitempty"`
-	Status             *string `json:"status,omitempty"`
-	Type               *string `json:"type,omitempty"`
-	Priority           *int    `json:"priority,omitempty"`
-	Description        *string `json:"description,omitempty"`
-	SpecID             *string `json:"spec_id,omitempty"`
-	ParentID           *string `json:"parent_id,omitempty"`
-	Assignee           *string `json:"assignee,omitempty"`
-	Notes              *string `json:"notes,omitempty"`
-	Design             *string `json:"design,omitempty"`
-	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
+	Title              *string        `json:"title,omitempty"`
+	Status             *string        `json:"status,omitempty"`
+	Type               *string        `json:"type,omitempty"`
+	Priority           *int           `json:"priority,omitempty"`
+	Description        *string        `json:"description,omitempty"`
+	SpecID             *string        `json:"spec_id,omitempty"`
+	ParentID           *string        `json:"parent_id,omitempty"`
+	Assignee           *string        `json:"assignee,omitempty"`
+	Notes              *string        `json:"notes,omitempty"`
+	Design             *string        `json:"design,omitempty"`
+	AcceptanceCriteria *string        `json:"acceptance_criteria,omitempty"`
 	SourceRepo         *string        `json:"source_repo,omitempty"`
 	Custom             map[string]any `json:"custom,omitempty"`
 }
@@ -50,7 +50,7 @@ type InfoResponse struct {
 
 // DepTreeResponse wraps the dependency tree output.
 type DepTreeResponse struct {
-	RootID string              `json:"root_id"`
+	RootID string               `json:"root_id"`
 	Nodes  []models.DepTreeNode `json:"nodes"`
 }
 
@@ -99,8 +99,8 @@ type TaskResponse struct {
 // TaskImportRecord represents one task in an import payload.
 type TaskImportRecord struct {
 	models.Task
-	Labels []string            `json:"labels,omitempty"`
-	Deps   []models.Dependency `json:"deps,omitempty"`
+	Labels []string            `json:"labels"`
+	Deps   []models.Dependency `json:"deps"`
 }
 
 // ImportRequest is the payload for POST /v1/import.

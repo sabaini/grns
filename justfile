@@ -11,6 +11,9 @@ test:
 test-integration: build
     bats tests/
 
+test-smoke: build
+    bats tests/cli_validation_errors.bats tests/cli_import_export.bats tests/cli_admin_cleanup.bats
+
 lint:
     golangci-lint run ./...
 

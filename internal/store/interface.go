@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"grns/internal/models"
@@ -20,6 +21,9 @@ type CleanupResult struct {
 	Count   int      `json:"count"`
 	DryRun  bool     `json:"dry_run"`
 }
+
+// ErrTaskNotFound indicates no matching tasks were found for a mutation.
+var ErrTaskNotFound = errors.New("task not found")
 
 // TaskStore abstracts task storage backends.
 type TaskStore interface {

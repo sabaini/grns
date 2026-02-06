@@ -8,23 +8,34 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
+const (
+	defaultHTTPTimeout = 10 * time.Second
+	httpTimeoutEnvKey  = "GRNS_HTTP_TIMEOUT"
+	apiTokenEnvKey     = "GRNS_API_TOKEN"
+	adminTokenEnvKey   = "GRNS_ADMIN_TOKEN"
+)
+
 // Client is a simple HTTP client for the grns API.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL    string
+	http       *http.Client
+	authToken  string
+	adminToken string
 }
 
 // NewClient creates a new API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		http: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		http:       &http.Client{Timeout: httpTimeoutFromEnv()},
+		authToken:  strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
+		adminToken: strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
 	}
 }
 
@@ -113,6 +124,8 @@ func (c *Client) AdminCleanup(ctx context.Context, req CleanupRequest, confirm b
 	if confirm {
 		httpReq.Header.Set("X-Confirm", "true")
 	}
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
 		return resp, err
@@ -132,12 +145,54 @@ func (c *Client) Import(ctx context.Context, req ImportRequest) (ImportResponse,
 	return resp, err
 }
 
+// ImportStream sends NDJSON import records to the streaming import endpoint.
+func (c *Client) ImportStream(ctx context.Context, records io.Reader, dryRun bool, dedupe, orphanHandling string) (ImportResponse, error) {
+	var resp ImportResponse
+	query := url.Values{}
+	if dryRun {
+		query.Set("dry_run", "true")
+	}
+	if dedupe != "" {
+		query.Set("dedupe", dedupe)
+	}
+	if orphanHandling != "" {
+		query.Set("orphan_handling", orphanHandling)
+	}
+
+	endpoint := c.baseURL + "/v1/import/stream"
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, records)
+	if err != nil {
+		return resp, err
+	}
+	req.Header.Set("Content-Type", "application/x-ndjson")
+	c.setAuthHeader(req)
+
+	httpResp, err := c.http.Do(req)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
 // Export streams NDJSON export to a writer.
 func (c *Client) Export(ctx context.Context, w io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/export", nil)
 	if err != nil {
 		return err
 	}
+	c.setAuthHeader(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -202,6 +257,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	c.setAuthHeader(req)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -229,4 +285,34 @@ func decodeError(resp *http.Response) error {
 		return fmt.Errorf("%s", errResp.Error)
 	}
 	return fmt.Errorf("api error: %s", resp.Status)
+}
+
+func (c *Client) setAuthHeader(req *http.Request) {
+	if c.authToken == "" || req == nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.authToken)
+}
+
+func (c *Client) setAdminHeader(req *http.Request) {
+	if c.adminToken == "" || req == nil {
+		return
+	}
+	req.Header.Set("X-Admin-Token", c.adminToken)
+}
+
+func httpTimeoutFromEnv() time.Duration {
+	value := strings.TrimSpace(os.Getenv(httpTimeoutEnvKey))
+	if value == "" {
+		return defaultHTTPTimeout
+	}
+
+	if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+		return duration
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	return defaultHTTPTimeout
 }

@@ -140,6 +140,7 @@ func TestListTasks(t *testing.T) {
 		{"by type", ListFilter{Types: []string{"bug"}}, 2},
 		{"by priority", ListFilter{Priority: intPtr(0)}, 1},
 		{"with limit", ListFilter{Limit: 1}, 1},
+		{"with offset only", ListFilter{Offset: 1}, 2},
 	}
 
 	for _, tt := range tests {
@@ -222,6 +223,19 @@ func TestCloseAndReopen(t *testing.T) {
 	}
 	if got.ClosedAt != nil {
 		t.Fatal("expected closed_at to be nil")
+	}
+}
+
+func TestCloseAndReopenMissingTask(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	if err := st.CloseTasks(ctx, []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
+		t.Fatalf("expected ErrTaskNotFound on close, got %v", err)
+	}
+	if err := st.ReopenTasks(ctx, []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
+		t.Fatalf("expected ErrTaskNotFound on reopen, got %v", err)
 	}
 }
 
@@ -686,6 +700,35 @@ func TestListTasksWithSearch(t *testing.T) {
 			t.Fatalf("expected 0 results, got %d", len(result))
 		}
 	})
+}
+
+func TestListTasksWithSpecRegexLimitOffset(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	tasks := []*models.Task{
+		{ID: "gr-rx01", Title: "Spec A", Status: "open", Type: "task", Priority: 2, SpecID: "docs/specs/a.md", CreatedAt: now.Add(-3 * time.Minute), UpdatedAt: now.Add(-3 * time.Minute)},
+		{ID: "gr-rx02", Title: "Spec B", Status: "open", Type: "task", Priority: 2, SpecID: "docs/specs/b.md", CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now.Add(-2 * time.Minute)},
+		{ID: "gr-rx03", Title: "Other", Status: "open", Type: "task", Priority: 2, SpecID: "notes/c.md", CreatedAt: now.Add(-1 * time.Minute), UpdatedAt: now.Add(-1 * time.Minute)},
+	}
+
+	for _, task := range tasks {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	result, err := st.ListTasks(ctx, ListFilter{SpecRegex: "(?i)docs/specs/.*", Offset: 1, Limit: 1})
+	if err != nil {
+		t.Fatalf("list with spec regex: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	if result[0].ID != "gr-rx01" {
+		t.Fatalf("expected gr-rx01 after offset, got %s", result[0].ID)
+	}
 }
 
 func TestCreateTaskWithCustom(t *testing.T) {

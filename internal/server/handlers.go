@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,9 +17,15 @@ import (
 )
 
 const (
-	defaultStatus   = "open"
-	defaultType     = "task"
-	defaultPriority = 2
+	defaultStatus         = "open"
+	defaultType           = "task"
+	defaultPriority       = 2
+	exportPageSize        = 500
+	defaultJSONMaxBody    = 1 << 20  // 1 MiB
+	batchJSONMaxBody      = 8 << 20  // 8 MiB
+	importJSONMaxBody     = 64 << 20 // 64 MiB
+	importStreamChunkSize = 500
+	importStreamMaxLine   = 10 << 20 // 10 MiB
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +73,7 @@ func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	var req api.TaskCloseRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -81,7 +89,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.service.Close(r.Context(), req.IDs); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, httpStatusFromError(err), err)
 		return
 	}
 
@@ -90,7 +98,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 	var req api.TaskReopenRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -106,7 +114,7 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.service.Reopen(r.Context(), req.IDs); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, httpStatusFromError(err), err)
 		return
 	}
 
@@ -114,7 +122,12 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	limit := queryInt(r, "limit")
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	responses, err := s.service.Ready(r.Context(), limit)
 	if err != nil {
 		s.writeError(w, httpStatusFromError(err), err)
@@ -125,8 +138,16 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
-	days := queryIntDefault(r, "days", 30)
-	limit := queryInt(r, "limit")
+	days, err := queryIntDefault(r, "days", 30)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	statuses := splitCSV(r.URL.Query().Get("status"))
 
 	if len(statuses) > 0 {
@@ -154,25 +175,20 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 	var req api.DepCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	childID := strings.TrimSpace(req.ChildID)
 	parentID := strings.TrimSpace(req.ParentID)
-	if !validateID(childID) || !validateID(parentID) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dependency ids"))
-		return
-	}
-
 	depType := strings.TrimSpace(req.Type)
 	if depType == "" {
 		depType = "blocks"
 	}
 
-	if err := s.store.AddDependency(r.Context(), childID, parentID, depType); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+	if err := s.service.AddDependency(r.Context(), childID, parentID, depType); err != nil {
+		s.writeError(w, httpStatusFromError(err), err)
 		return
 	}
 
@@ -181,7 +197,7 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 	var req api.CleanupRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -214,57 +230,70 @@ func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if !s.acquireLimiter(s.exportLimiter, w, "export") {
+		return
+	}
+	defer s.releaseLimiter(s.exportLimiter)
+
 	ctx := r.Context()
-
-	// Fetch all tasks.
-	tasks, err := s.store.ListTasks(ctx, store.ListFilter{})
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if len(tasks) == 0 {
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Bulk fetch labels and deps.
-	ids := make([]string, 0, len(tasks))
-	for _, t := range tasks {
-		ids = append(ids, t.ID)
-	}
-	labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 	enc := json.NewEncoder(w)
 
-	for _, t := range tasks {
-		labels := labelMap[t.ID]
-		if labels == nil {
-			labels = []string{}
+	offset := 0
+	for {
+		tasks, err := s.store.ListTasks(ctx, store.ListFilter{Limit: exportPageSize, Offset: offset})
+		if err != nil {
+			s.logger.Error("export list tasks", "error", err)
+			return
 		}
-		deps := depMap[t.ID]
-		record := api.TaskResponse{Task: t, Labels: labels, Deps: deps}
-		_ = enc.Encode(record)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
+		if len(tasks) == 0 {
+			return
 		}
+
+		ids := make([]string, 0, len(tasks))
+		for _, t := range tasks {
+			ids = append(ids, t.ID)
+		}
+		labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
+		if err != nil {
+			s.logger.Error("export list labels", "error", err)
+			return
+		}
+		depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
+		if err != nil {
+			s.logger.Error("export list dependencies", "error", err)
+			return
+		}
+
+		for _, t := range tasks {
+			labels := labelMap[t.ID]
+			if labels == nil {
+				labels = []string{}
+			}
+			deps := depMap[t.ID]
+			record := api.TaskResponse{Task: t, Labels: labels, Deps: deps}
+			if err := enc.Encode(record); err != nil {
+				s.logger.Error("export encode", "error", err)
+				return
+			}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+
+		offset += len(tasks)
 	}
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if !s.acquireLimiter(s.importLimiter, w, "import") {
+		return
+	}
+	defer s.releaseLimiter(s.importLimiter)
+
 	var req api.ImportRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -298,6 +327,108 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
+	if !s.acquireLimiter(s.importLimiter, w, "import") {
+		return
+	}
+	defer s.releaseLimiter(s.importLimiter)
+
+	dedupe := strings.TrimSpace(r.URL.Query().Get("dedupe"))
+	orphanHandling := strings.TrimSpace(r.URL.Query().Get("orphan_handling"))
+	dryRunValue := strings.TrimSpace(r.URL.Query().Get("dry_run"))
+	dryRun := false
+	if dryRunValue != "" {
+		parsed, err := strconv.ParseBool(dryRunValue)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dry_run"))
+			return
+		}
+		dryRun = parsed
+	}
+
+	switch dedupe {
+	case "", "skip", "overwrite", "error":
+	default:
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", dedupe))
+		return
+	}
+	switch orphanHandling {
+	case "", "allow", "skip", "strict":
+	default:
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", orphanHandling))
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, int64(importJSONMaxBody))
+	scanner := bufio.NewScanner(r.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), importStreamMaxLine)
+
+	response := api.ImportResponse{DryRun: dryRun, TaskIDs: []string{}}
+	chunk := make([]api.TaskImportRecord, 0, importStreamChunkSize)
+	lineNum := 0
+	hasRecords := false
+
+	flushChunk := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		resp, err := s.service.Import(r.Context(), api.ImportRequest{
+			Tasks:          chunk,
+			DryRun:         dryRun,
+			Dedupe:         dedupe,
+			OrphanHandling: orphanHandling,
+		})
+		if err != nil {
+			return err
+		}
+		response.Created += resp.Created
+		response.Updated += resp.Updated
+		response.Skipped += resp.Skipped
+		response.Errors += resp.Errors
+		response.TaskIDs = append(response.TaskIDs, resp.TaskIDs...)
+		response.Messages = append(response.Messages, resp.Messages...)
+		chunk = chunk[:0]
+		return nil
+	}
+
+	for scanner.Scan() {
+		lineNum++
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		hasRecords = true
+
+		var rec api.TaskImportRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("line %d: %w", lineNum, err))
+			return
+		}
+		chunk = append(chunk, rec)
+
+		if len(chunk) >= importStreamChunkSize {
+			if err := flushChunk(); err != nil {
+				s.writeError(w, httpStatusFromError(err), err)
+				return
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("reading input: %w", err))
+		return
+	}
+	if !hasRecords {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("no records found in input"))
+		return
+	}
+	if err := flushChunk(); err != nil {
+		s.writeError(w, httpStatusFromError(err), err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 	labels, err := s.store.ListAllLabels(r.Context())
 	if err != nil {
@@ -310,7 +441,7 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req api.TaskCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -326,7 +457,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 	var reqs []api.TaskCreateRequest
-	if err := decodeJSON(r, &reqs); err != nil {
+	if err := decodeJSON(w, r, &reqs); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -368,7 +499,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req api.TaskUpdateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -383,14 +514,25 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	offset, err := queryInt(r, "offset")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	filter := store.ListFilter{
 		Statuses:  splitCSV(r.URL.Query().Get("status")),
 		Types:     splitCSV(r.URL.Query().Get("type")),
 		ParentID:  strings.TrimSpace(r.URL.Query().Get("parent_id")),
 		Labels:    splitCSV(r.URL.Query().Get("label")),
 		LabelsAny: splitCSV(r.URL.Query().Get("label_any")),
-		Limit:     queryInt(r, "limit"),
-		Offset:    queryInt(r, "offset"),
+		Limit:     limit,
+		Offset:    offset,
 	}
 
 	if filter.ParentID != "" && !validateID(filter.ParentID) {
@@ -570,6 +712,14 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		filter.SpecRegex = pattern
 	}
 
+	heavySearch := filter.SearchQuery != "" || filter.SpecRegex != ""
+	if heavySearch {
+		if !s.acquireLimiter(s.searchLimiter, w, "search") {
+			return
+		}
+		defer s.releaseLimiter(s.searchLimiter)
+	}
+
 	responses, err := s.service.List(r.Context(), filter)
 	if err != nil {
 		s.writeError(w, httpStatusFromError(err), err)
@@ -603,23 +753,13 @@ func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req api.LabelsRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	labels, err := normalizeLabels(req.Labels)
+	labels, err := s.service.AddLabels(r.Context(), id, req.Labels)
 	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	if err := s.store.AddLabels(r.Context(), id, labels); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	labels, err = s.store.ListLabels(r.Context(), id)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, httpStatusFromError(err), err)
 		return
 	}
 
@@ -634,23 +774,13 @@ func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req api.LabelsRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	labels, err := normalizeLabels(req.Labels)
+	labels, err := s.service.RemoveLabels(r.Context(), id, req.Labels)
 	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	if err := s.store.RemoveLabels(r.Context(), id, labels); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	labels, err = s.store.ListLabels(r.Context(), id)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, httpStatusFromError(err), err)
 		return
 	}
 
@@ -659,16 +789,20 @@ func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) writeError(w http.ResponseWriter, status int, err error) {
 	code := errorCode(status, err)
+	message := err.Error()
 	if status >= 500 {
 		s.logger.Error("request error", "status", status, "code", code, "error", err)
+		message = "internal error"
 	}
-	s.writeJSON(w, status, api.ErrorResponse{Error: err.Error(), Code: code})
+	s.writeJSON(w, status, api.ErrorResponse{Error: message, Code: code})
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		s.logger.Error("write json response", "status", status, "error", err)
+	}
 }
 
 type apiError struct {
@@ -725,7 +859,26 @@ func isUniqueConstraint(err error) bool {
 	return strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.id")
 }
 
-func decodeJSON(r *http.Request, dst any) error {
+func isInvalidSearchQuery(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unterminated string") ||
+		strings.Contains(message, "fts5") && strings.Contains(message, "syntax") ||
+		strings.Contains(message, "malformed match")
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	maxBytes := defaultJSONMaxBody
+	switch r.URL.Path {
+	case "/v1/import":
+		maxBytes = importJSONMaxBody
+	case "/v1/tasks/batch":
+		maxBytes = batchJSONMaxBody
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
 	return json.NewDecoder(r.Body).Decode(dst)
 }
 
@@ -746,25 +899,34 @@ func splitCSV(value string) []string {
 	return out
 }
 
-func queryInt(r *http.Request, key string) int {
+func queryInt(r *http.Request, key string) (int, error) {
 	value := strings.TrimSpace(r.URL.Query().Get(key))
 	if value == "" {
-		return 0
-	}
-	parsed, _ := strconv.Atoi(value)
-	return parsed
-}
-
-func queryIntDefault(r *http.Request, key string, def int) int {
-	value := strings.TrimSpace(r.URL.Query().Get(key))
-	if value == "" {
-		return def
+		return 0, nil
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return def
+		return 0, fmt.Errorf("invalid %s", key)
 	}
-	return parsed
+	if parsed < 0 {
+		return 0, fmt.Errorf("%s must be >= 0", key)
+	}
+	return parsed, nil
+}
+
+func queryIntDefault(r *http.Request, key string, def int) (int, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return def, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s", key)
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("%s must be >= 0", key)
+	}
+	return parsed, nil
 }
 
 func valueOrEmpty(ptr *string) string {

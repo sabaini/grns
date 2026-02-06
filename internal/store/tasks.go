@@ -178,10 +178,6 @@ func (s *Store) UpdateTask(ctx context.Context, id string, update TaskUpdate) er
 	set = append(set, "updated_at = ?")
 	args = append(args, dbFormatTime(update.UpdatedAt))
 
-	if len(set) == 0 {
-		return nil
-	}
-
 	args = append(args, id)
 	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ?", strings.Join(set, ", "))
 	_, err := s.db.ExecContext(ctx, query, args...)
@@ -198,6 +194,10 @@ func (s *Store) ListTasks(ctx context.Context, filter ListFilter) ([]models.Task
 	}
 	defer rows.Close()
 
+	if filter.SpecRegex != "" {
+		return filterRowsBySpecRegex(rows, filter.SpecRegex, filter.Limit, filter.Offset)
+	}
+
 	var tasks []models.Task
 	for rows.Next() {
 		task, err := scanTask(rows)
@@ -208,14 +208,6 @@ func (s *Store) ListTasks(ctx context.Context, filter ListFilter) ([]models.Task
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-
-	if filter.SpecRegex != "" {
-		filtered, err := filterBySpecRegex(tasks, filter.SpecRegex, filter.Limit, filter.Offset)
-		if err != nil {
-			return nil, err
-		}
-		return filtered, nil
 	}
 
 	return tasks, nil
@@ -307,7 +299,7 @@ func (s *Store) AddLabels(ctx context.Context, id string, labels []string) error
 	if len(labels) == 0 {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO task_labels (task_id, label) VALUES " + labelValues(len(labels)), labelArgs(id, labels)...)
+	_, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO task_labels (task_id, label) VALUES "+labelValues(len(labels)), labelArgs(id, labels)...)
 	return err
 }
 
@@ -487,8 +479,18 @@ func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time
 		args = append(args, id)
 	}
 	query := fmt.Sprintf("UPDATE tasks SET status = 'closed', closed_at = ?, updated_at = ? WHERE id IN (%s)", placeholders(len(ids)))
-	_, err := s.db.ExecContext(ctx, query, args...)
-	return err
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrTaskNotFound
+	}
+	return nil
 }
 
 // ReopenTasks reopens tasks and clears closed_at.
@@ -502,8 +504,18 @@ func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.T
 		args = append(args, id)
 	}
 	query := fmt.Sprintf("UPDATE tasks SET status = 'open', closed_at = NULL, updated_at = ? WHERE id IN (%s)", placeholders(len(ids)))
-	_, err := s.db.ExecContext(ctx, query, args...)
-	return err
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrTaskNotFound
+	}
+	return nil
 }
 
 // TaskUpdate describes fields to update.
@@ -640,48 +652,58 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		query += " ORDER BY updated_at DESC"
 	}
 
-	if filter.SpecRegex == "" && filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
-	}
-	if filter.SpecRegex == "" && filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
+	if filter.SpecRegex == "" {
+		hasLimit := false
+		if filter.Limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, filter.Limit)
+			hasLimit = true
+		}
+		if filter.Offset > 0 {
+			if !hasLimit {
+				query += " LIMIT -1"
+			}
+			query += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
 	}
 
 	return query, args
 }
 
-func filterBySpecRegex(tasks []models.Task, pattern string, limit, offset int) ([]models.Task, error) {
+func filterRowsBySpecRegex(rows *sql.Rows, pattern string, limit, offset int) ([]models.Task, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
 
-	var filtered []models.Task
-	for _, task := range tasks {
-		if task.SpecID == "" {
+	filtered := []models.Task{}
+	skipped := 0
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		if task.SpecID == "" || !re.MatchString(task.SpecID) {
 			continue
 		}
-		if re.MatchString(task.SpecID) {
-			filtered = append(filtered, task)
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, *task)
+		if limit > 0 && len(filtered) >= limit {
+			break
 		}
 	}
-
-	if offset > 0 {
-		if offset >= len(filtered) {
-			return []models.Task{}, nil
-		}
-		filtered = filtered[offset:]
-	}
-	if limit > 0 && limit < len(filtered) {
-		filtered = filtered[:limit]
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return filtered, nil
 }
 
-func scanTask(scanner interface{
+func scanTask(scanner interface {
 	Scan(dest ...any) error
 }) (*models.Task, error) {
 	var task models.Task

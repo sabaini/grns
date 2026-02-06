@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 )
 
 func (s *Server) routes() http.Handler {
@@ -39,6 +41,7 @@ func (s *Server) routes() http.Handler {
 	// Import/Export.
 	mux.HandleFunc("GET /v1/export", s.handleExport)
 	mux.HandleFunc("POST /v1/import", s.handleImport)
+	mux.HandleFunc("POST /v1/import/stream", s.handleImportStream)
 
 	// Admin.
 	mux.HandleFunc("POST /v1/admin/cleanup", s.handleAdminCleanup)
@@ -47,5 +50,49 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/deps", s.handleDeps)
 	mux.HandleFunc("GET /v1/labels", s.handleLabels)
 
-	return mux
+	return s.withAuth(mux)
+}
+
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	if s.apiToken == "" && s.adminToken == "" {
+		return next
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !strings.HasPrefix(r.URL.Path, "/v1/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if s.apiToken != "" {
+			auth := strings.TrimSpace(r.Header.Get("Authorization"))
+			expected := "Bearer " + s.apiToken
+			if auth != expected {
+				s.writeError(w, http.StatusUnauthorized, apiError{
+					status: http.StatusUnauthorized,
+					code:   "unauthorized",
+					err:    fmt.Errorf("unauthorized"),
+				})
+				return
+			}
+		}
+
+		if s.adminToken != "" && strings.HasPrefix(r.URL.Path, "/v1/admin/") {
+			adminToken := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
+			if adminToken != s.adminToken {
+				s.writeError(w, http.StatusForbidden, apiError{
+					status: http.StatusForbidden,
+					code:   "forbidden",
+					err:    fmt.Errorf("forbidden"),
+				})
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

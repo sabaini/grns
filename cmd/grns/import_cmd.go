@@ -19,6 +19,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		dryRun         bool
 		dedupe         string
 		orphanHandling string
+		stream         bool
 	)
 
 	cmd := &cobra.Command{
@@ -36,40 +37,45 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				}
 				defer f.Close()
 
-				var records []api.TaskImportRecord
-				scanner := bufio.NewScanner(f)
-				scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
-				lineNum := 0
-				for scanner.Scan() {
-					lineNum++
-					line := scanner.Bytes()
-					if len(line) == 0 {
-						continue
+				var (
+					resp      api.ImportResponse
+					importErr error
+				)
+				if stream {
+					resp, importErr = client.ImportStream(cmd.Context(), f, dryRun, dedupe, orphanHandling)
+				} else {
+					// Preserve existing import semantics by default.
+					var records []api.TaskImportRecord
+					scanner := bufio.NewScanner(f)
+					scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+					lineNum := 0
+					for scanner.Scan() {
+						lineNum++
+						line := scanner.Bytes()
+						if len(line) == 0 {
+							continue
+						}
+						var rec api.TaskImportRecord
+						if err := json.Unmarshal(line, &rec); err != nil {
+							return fmt.Errorf("line %d: %w", lineNum, err)
+						}
+						records = append(records, rec)
 					}
-					var rec api.TaskImportRecord
-					if err := json.Unmarshal(line, &rec); err != nil {
-						return fmt.Errorf("line %d: %w", lineNum, err)
+					if err := scanner.Err(); err != nil {
+						return fmt.Errorf("reading input: %w", err)
 					}
-					records = append(records, rec)
+					if len(records) == 0 {
+						return errors.New("no records found in input file")
+					}
+					resp, importErr = client.Import(cmd.Context(), api.ImportRequest{
+						Tasks:          records,
+						DryRun:         dryRun,
+						Dedupe:         dedupe,
+						OrphanHandling: orphanHandling,
+					})
 				}
-				if err := scanner.Err(); err != nil {
-					return fmt.Errorf("reading input: %w", err)
-				}
-
-				if len(records) == 0 {
-					return errors.New("no records found in input file")
-				}
-
-				req := api.ImportRequest{
-					Tasks:          records,
-					DryRun:         dryRun,
-					Dedupe:         dedupe,
-					OrphanHandling: orphanHandling,
-				}
-
-				resp, err := client.Import(cmd.Context(), req)
-				if err != nil {
-					return err
+				if importErr != nil {
+					return importErr
 				}
 
 				if *jsonOutput {
@@ -86,6 +92,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without making changes")
 	cmd.Flags().StringVar(&dedupe, "dedupe", "skip", "dedupe mode: skip|overwrite|error")
 	cmd.Flags().StringVar(&orphanHandling, "orphan-handling", "allow", "orphan dep handling: allow|skip|strict")
+	cmd.Flags().BoolVar(&stream, "stream", false, "use streaming import endpoint for large files")
 
 	return cmd
 }

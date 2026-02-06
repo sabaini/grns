@@ -42,3 +42,9 @@ load 'helpers.bash'
   count="$(printf '%s' "$output" | json_array_len)"
   [ "$count" = "1" ]
 }
+
+@test "search rejects malformed query syntax" {
+  run "$GRNS_BIN" list --search '"' --json
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "invalid search query"
+}

@@ -46,9 +46,11 @@ func Open(path string) (*Store, error) {
 	}
 
 	if err := configureDB(db); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 	if err := runMigrations(db); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 

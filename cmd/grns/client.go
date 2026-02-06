@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"grns/internal/api"
@@ -110,9 +111,16 @@ func waitForServer(client *api.Client, timeout time.Duration) error {
 }
 
 func isConnRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+
 	var netErr *net.OpError
 	if errors.As(err, &netErr) {
-		return true
+		return errors.Is(netErr.Err, syscall.ECONNREFUSED)
 	}
 	return false
 }
@@ -122,5 +130,5 @@ func serverLogFile() (*os.File, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(filepath.Join(dir, "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	return os.OpenFile(filepath.Join(dir, "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 }

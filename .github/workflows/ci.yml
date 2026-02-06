@@ -7,7 +7,32 @@ on:
     branches: [main, master]
 
 jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Build
+        run: just build
+
+      - name: Unit tests
+        run: just test
+
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Smoke integration tests
+        run: just test-smoke
+
   test:
+    needs: smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

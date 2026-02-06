@@ -90,3 +90,52 @@ load 'helpers.bash'
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "not_found"
 }
+
+@test "close and reopen nonexistent id return not_found" {
+  run "$GRNS_BIN" close gr-zzzz --json
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "not_found"
+
+  run "$GRNS_BIN" reopen gr-zzzz --json
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "not_found"
+}
+
+@test "list rejects malformed numeric query params via API" {
+  port="$(get_free_port)"
+  export GRNS_API_URL="http://127.0.0.1:${port}"
+
+  "$GRNS_BIN" srv >/dev/null 2>&1 &
+  GRNS_TEST_HTTP_PID=$!
+  export GRNS_TEST_HTTP_PID
+
+  run python3 - <<'PY'
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+
+base = os.environ["GRNS_API_URL"]
+health = base + "/health"
+for _ in range(40):
+    try:
+        with urllib.request.urlopen(health, timeout=0.2):
+            break
+    except Exception:
+        time.sleep(0.05)
+else:
+    raise SystemExit("server did not start")
+
+url = base + "/v1/tasks?offset=-1"
+try:
+    urllib.request.urlopen(url)
+    raise SystemExit(1)
+except urllib.error.HTTPError as e:
+    body = e.read().decode('utf-8')
+    data = json.loads(body)
+    assert e.code == 400
+    assert "offset" in data.get("error", "")
+PY
+  [ "$status" -eq 0 ]
+}

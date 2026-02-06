@@ -3,6 +3,9 @@
 ## Summary
 Grns is a lightweight issue tracker and memory system for agents, focused on durable tasks, dependencies, and recency. It exposes a CLI-first interface with machine-readable I/O and uses a REST API from the start: the CLI talks to a local server for single-user mode and the same server scales to multi-user deployments.
 
+Related design docs:
+- [Attachments Design](attachments.md)
+
 ## Problem Statement
 We need a fast, CLI-oriented task tracker that supports dependency modeling and recency queries while remaining simple enough for local use, yet extensible enough for multi-user collaboration.
 
@@ -97,6 +100,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - Tables: `tasks`, `task_labels`, `task_deps`; indexed by `status`, `priority`, `updated_at`, `spec_id`, `parent_id`, plus join indexes for labels/deps.
 - Regex filters (e.g., `list --spec`) are applied in the service layer using Go's `regexp` (RE2), case-insensitive by default, unless SQLite REGEXP is enabled.
 - **External I/O:** JSON for CLI output (YAML/TOML post‑MVP); full-database import/export post‑MVP.
+- **Attachments:** hybrid model—metadata in SQLite, blob bytes in managed blob storage; see [Attachments Design](attachments.md).
 
 ### Storage Rationale
 - **Embedded + server-ready:** SQLite is zero-config for single-user installs and works unchanged in server mode.
