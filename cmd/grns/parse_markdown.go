@@ -80,6 +80,21 @@ func frontMatterToRequest(frontMatter map[string]any) (api.TaskCreateRequest, er
 	if value, ok := frontMatter["parent_id"].(string); ok {
 		req.ParentID = &value
 	}
+	if value, ok := frontMatter["assignee"].(string); ok {
+		req.Assignee = &value
+	}
+	if value, ok := frontMatter["notes"].(string); ok {
+		req.Notes = &value
+	}
+	if value, ok := frontMatter["design"].(string); ok {
+		req.Design = &value
+	}
+	if value, ok := frontMatter["acceptance_criteria"].(string); ok {
+		req.AcceptanceCriteria = &value
+	}
+	if value, ok := frontMatter["source_repo"].(string); ok {
+		req.SourceRepo = &value
+	}
 	if value, ok := frontMatter["labels"]; ok {
 		req.Labels = toStringSlice(value)
 	}

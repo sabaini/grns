@@ -12,13 +12,18 @@ import (
 
 func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	var (
-		title       string
-		status      string
-		issueType   string
-		priority    int
-		description string
-		specID      string
-		parentID    string
+		title              string
+		status             string
+		issueType          string
+		priority           int
+		description        string
+		specID             string
+		parentID           string
+		assignee           string
+		notes              string
+		design             string
+		acceptanceCriteria string
+		sourceRepo         string
 	)
 
 	cmd := &cobra.Command{
@@ -54,8 +59,23 @@ func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if cmd.Flags().Changed("parent") {
 					req.ParentID = &parentID
 				}
+				if cmd.Flags().Changed("assignee") {
+					req.Assignee = &assignee
+				}
+				if cmd.Flags().Changed("notes") {
+					req.Notes = &notes
+				}
+				if cmd.Flags().Changed("design") {
+					req.Design = &design
+				}
+				if cmd.Flags().Changed("acceptance") {
+					req.AcceptanceCriteria = &acceptanceCriteria
+				}
+				if cmd.Flags().Changed("source-repo") {
+					req.SourceRepo = &sourceRepo
+				}
 
-				if req.Title == nil && req.Status == nil && req.Type == nil && req.Priority == nil && req.Description == nil && req.SpecID == nil && req.ParentID == nil {
+				if req.Title == nil && req.Status == nil && req.Type == nil && req.Priority == nil && req.Description == nil && req.SpecID == nil && req.ParentID == nil && req.Assignee == nil && req.Notes == nil && req.Design == nil && req.AcceptanceCriteria == nil && req.SourceRepo == nil {
 					return errors.New("no fields to update")
 				}
 
@@ -85,6 +105,11 @@ func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "description")
 	cmd.Flags().StringVar(&specID, "spec-id", "", "spec id")
 	cmd.Flags().StringVar(&parentID, "parent", "", "parent id")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "assignee")
+	cmd.Flags().StringVar(&notes, "notes", "", "notes")
+	cmd.Flags().StringVar(&design, "design", "", "design")
+	cmd.Flags().StringVar(&acceptanceCriteria, "acceptance", "", "acceptance criteria")
+	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "source repository")
 
 	return cmd
 }

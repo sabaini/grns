@@ -325,6 +325,79 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if assignee := strings.TrimSpace(r.URL.Query().Get("assignee")); assignee != "" {
+		filter.Assignee = assignee
+	}
+	if r.URL.Query().Get("no_assignee") == "true" {
+		filter.NoAssignee = true
+	}
+	if ids := splitCSV(r.URL.Query().Get("id")); len(ids) > 0 {
+		filter.IDs = ids
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("title_contains")); v != "" {
+		filter.TitleContains = v
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("desc_contains")); v != "" {
+		filter.DescContains = v
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("notes_contains")); v != "" {
+		filter.NotesContains = v
+	}
+	if v := r.URL.Query().Get("created_after"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid created_after: %w", err))
+			return
+		}
+		filter.CreatedAfter = &t
+	}
+	if v := r.URL.Query().Get("created_before"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid created_before: %w", err))
+			return
+		}
+		filter.CreatedBefore = &t
+	}
+	if v := r.URL.Query().Get("updated_after"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid updated_after: %w", err))
+			return
+		}
+		filter.UpdatedAfter = &t
+	}
+	if v := r.URL.Query().Get("updated_before"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid updated_before: %w", err))
+			return
+		}
+		filter.UpdatedBefore = &t
+	}
+	if v := r.URL.Query().Get("closed_after"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid closed_after: %w", err))
+			return
+		}
+		filter.ClosedAfter = &t
+	}
+	if v := r.URL.Query().Get("closed_before"); v != "" {
+		t, err := parseFlexibleTime(v)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid closed_before: %w", err))
+			return
+		}
+		filter.ClosedBefore = &t
+	}
+	if r.URL.Query().Get("empty_description") == "true" {
+		filter.EmptyDescription = true
+	}
+	if r.URL.Query().Get("no_labels") == "true" {
+		filter.NoLabels = true
+	}
+
 	spec := strings.TrimSpace(r.URL.Query().Get("spec"))
 	if spec != "" {
 		pattern := "(?i)" + spec
@@ -537,4 +610,17 @@ func valueOrEmpty(ptr *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*ptr)
+}
+
+func parseFlexibleTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	t, err := time.Parse(time.RFC3339, value)
+	if err == nil {
+		return t, nil
+	}
+	t, err = time.Parse("2006-01-02", value)
+	if err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("expected RFC3339 or YYYY-MM-DD format")
 }

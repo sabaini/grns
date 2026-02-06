@@ -47,8 +47,23 @@ func writeTaskDetail(task api.TaskResponse) error {
 	if task.ParentID != "" {
 		lines = append(lines, fmt.Sprintf("parent_id: %s", task.ParentID))
 	}
+	if task.Assignee != "" {
+		lines = append(lines, fmt.Sprintf("assignee: %s", task.Assignee))
+	}
+	if task.SourceRepo != "" {
+		lines = append(lines, fmt.Sprintf("source_repo: %s", task.SourceRepo))
+	}
 	if task.Description != "" {
 		lines = append(lines, fmt.Sprintf("description: %s", task.Description))
+	}
+	if task.Notes != "" {
+		lines = append(lines, fmt.Sprintf("notes: %s", task.Notes))
+	}
+	if task.Design != "" {
+		lines = append(lines, fmt.Sprintf("design: %s", task.Design))
+	}
+	if task.AcceptanceCriteria != "" {
+		lines = append(lines, fmt.Sprintf("acceptance_criteria: %s", task.AcceptanceCriteria))
 	}
 	if task.ClosedAt != nil {
 		lines = append(lines, fmt.Sprintf("closed_at: %s", formatTime(*task.ClosedAt)))

@@ -111,11 +111,16 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 		Status:      status,
 		Type:        issueType,
 		Priority:    priority,
-		Description: valueOrEmpty(req.Description),
-		SpecID:      valueOrEmpty(req.SpecID),
-		ParentID:    parentID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Description:        valueOrEmpty(req.Description),
+		SpecID:             valueOrEmpty(req.SpecID),
+		ParentID:           parentID,
+		Assignee:           valueOrEmpty(req.Assignee),
+		Notes:              valueOrEmpty(req.Notes),
+		Design:             valueOrEmpty(req.Design),
+		AcceptanceCriteria: valueOrEmpty(req.AcceptanceCriteria),
+		SourceRepo:         valueOrEmpty(req.SourceRepo),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if status == "closed" {
 		task.ClosedAt = &now
@@ -183,6 +188,21 @@ func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateR
 			return resp, badRequest(fmt.Errorf("invalid parent_id"))
 		}
 		update.ParentID = &parent
+	}
+	if req.Assignee != nil {
+		update.Assignee = req.Assignee
+	}
+	if req.Notes != nil {
+		update.Notes = req.Notes
+	}
+	if req.Design != nil {
+		update.Design = req.Design
+	}
+	if req.AcceptanceCriteria != nil {
+		update.AcceptanceCriteria = req.AcceptanceCriteria
+	}
+	if req.SourceRepo != nil {
+		update.SourceRepo = req.SourceRepo
 	}
 
 	if err := s.store.UpdateTask(ctx, id, update); err != nil {

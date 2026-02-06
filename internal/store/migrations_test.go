@@ -30,8 +30,8 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected version 1, got %d", version)
+	if version != 2 {
+		t.Fatalf("expected version 2, got %d", version)
 	}
 
 	// Verify tasks table exists.
@@ -58,8 +58,8 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected version 1, got %d", version)
+	if version != 2 {
+		t.Fatalf("expected version 2, got %d", version)
 	}
 }
 
@@ -105,8 +105,8 @@ func TestDetectPreMigrationDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected version 1, got %d", version)
+	if version != 2 {
+		t.Fatalf("expected version 2, got %d", version)
 	}
 }
 
@@ -120,10 +120,46 @@ func TestMigrationPlan(t *testing.T) {
 	if plan.CurrentVersion != 0 {
 		t.Fatalf("expected current 0, got %d", plan.CurrentVersion)
 	}
-	if plan.AvailableVersion != 1 {
-		t.Fatalf("expected available 1, got %d", plan.AvailableVersion)
+	if plan.AvailableVersion != 2 {
+		t.Fatalf("expected available 2, got %d", plan.AvailableVersion)
 	}
-	if len(plan.Pending) != 1 {
-		t.Fatalf("expected 1 pending, got %d", len(plan.Pending))
+	if len(plan.Pending) != 2 {
+		t.Fatalf("expected 2 pending, got %d", len(plan.Pending))
+	}
+}
+
+func TestMigration002UpgradePath(t *testing.T) {
+	db := testRawDB(t)
+
+	// Apply only migration 1 by running and then verifying.
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	version, err := currentVersion(db)
+	if err != nil {
+		t.Fatalf("current version: %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("expected version 2, got %d", version)
+	}
+
+	// Verify new columns exist by inserting a row that uses them.
+	_, err = db.Exec(`INSERT INTO tasks (id, title, status, type, priority, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at)
+		VALUES ('test-1', 'Test', 'open', 'task', 2, 'alice', 'some notes', 'some design', 'criteria', 'github.com/test', datetime('now'), datetime('now'))`)
+	if err != nil {
+		t.Fatalf("insert with new columns: %v", err)
+	}
+
+	var assignee, notes string
+	err = db.QueryRow("SELECT assignee, notes FROM tasks WHERE id = 'test-1'").Scan(&assignee, &notes)
+	if err != nil {
+		t.Fatalf("query new columns: %v", err)
+	}
+	if assignee != "alice" {
+		t.Fatalf("expected assignee 'alice', got %q", assignee)
+	}
+	if notes != "some notes" {
+		t.Fatalf("expected notes 'some notes', got %q", notes)
 	}
 }

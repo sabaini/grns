@@ -15,15 +15,20 @@ import (
 
 func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	var (
-		id          string
-		issueType   string
-		priority    int
-		description string
-		specID      string
-		parentID    string
-		labels      []string
-		deps        string
-		filePath    string
+		id                 string
+		issueType          string
+		priority           int
+		description        string
+		specID             string
+		parentID           string
+		assignee           string
+		notes              string
+		design             string
+		acceptanceCriteria string
+		sourceRepo         string
+		labels             []string
+		deps               string
+		filePath           string
 	)
 
 	cmd := &cobra.Command{
@@ -57,6 +62,21 @@ func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if parentID != "" {
 					req.ParentID = &parentID
 				}
+				if assignee != "" {
+					req.Assignee = &assignee
+				}
+				if notes != "" {
+					req.Notes = &notes
+				}
+				if design != "" {
+					req.Design = &design
+				}
+				if acceptanceCriteria != "" {
+					req.AcceptanceCriteria = &acceptanceCriteria
+				}
+				if sourceRepo != "" {
+					req.SourceRepo = &sourceRepo
+				}
 				if len(labels) > 0 {
 					req.Labels = labels
 				}
@@ -86,6 +106,11 @@ func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "task description")
 	cmd.Flags().StringVar(&specID, "spec-id", "", "spec id")
 	cmd.Flags().StringVar(&parentID, "parent", "", "parent task id")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "assignee")
+	cmd.Flags().StringVar(&notes, "notes", "", "notes")
+	cmd.Flags().StringVar(&design, "design", "", "design")
+	cmd.Flags().StringVar(&acceptanceCriteria, "acceptance", "", "acceptance criteria")
+	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "source repository")
 	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "labels")
 	cmd.Flags().StringSliceVar(&labels, "labels", nil, "labels")
 	cmd.Flags().StringVar(&deps, "deps", "", "dependencies")

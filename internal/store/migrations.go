@@ -71,6 +71,20 @@ CREATE INDEX IF NOT EXISTS idx_task_deps_child ON task_deps(child_id);
 CREATE INDEX IF NOT EXISTS idx_task_deps_parent ON task_deps(parent_id);
 `,
 	},
+	{
+		Version:     2,
+		Description: "add assignee, notes, design, acceptance_criteria, source_repo columns",
+		SQL: `
+ALTER TABLE tasks ADD COLUMN assignee TEXT;
+ALTER TABLE tasks ADD COLUMN notes TEXT;
+ALTER TABLE tasks ADD COLUMN design TEXT;
+ALTER TABLE tasks ADD COLUMN acceptance_criteria TEXT;
+ALTER TABLE tasks ADD COLUMN source_repo TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+CREATE INDEX IF NOT EXISTS idx_tasks_source_repo ON tasks(source_repo);
+`,
+	},
 }
 
 const migrationsTableSQL = `

@@ -225,4 +225,171 @@ func TestCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestCreateAndGetTaskWithNewFields(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	task := &models.Task{
+		ID:                 "gr-nf01",
+		Title:              "New fields test",
+		Status:             "open",
+		Type:               "task",
+		Priority:           2,
+		Assignee:           "alice",
+		Notes:              "some notes",
+		Design:             "design doc",
+		AcceptanceCriteria: "it works",
+		SourceRepo:         "github.com/test/repo",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+
+	if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := st.GetTask(ctx, "gr-nf01")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if got.Assignee != "alice" {
+		t.Fatalf("expected assignee 'alice', got %q", got.Assignee)
+	}
+	if got.Notes != "some notes" {
+		t.Fatalf("expected notes 'some notes', got %q", got.Notes)
+	}
+	if got.Design != "design doc" {
+		t.Fatalf("expected design 'design doc', got %q", got.Design)
+	}
+	if got.AcceptanceCriteria != "it works" {
+		t.Fatalf("expected acceptance_criteria 'it works', got %q", got.AcceptanceCriteria)
+	}
+	if got.SourceRepo != "github.com/test/repo" {
+		t.Fatalf("expected source_repo 'github.com/test/repo', got %q", got.SourceRepo)
+	}
+}
+
+func TestUpdateTaskNewFields(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	task := &models.Task{ID: "gr-uf01", Title: "Update fields", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	assignee := "bob"
+	notes := "updated notes"
+	design := "new design"
+	ac := "acceptance criteria"
+	repo := "github.com/updated"
+	if err := st.UpdateTask(ctx, "gr-uf01", TaskUpdate{
+		Assignee:           &assignee,
+		Notes:              &notes,
+		Design:             &design,
+		AcceptanceCriteria: &ac,
+		SourceRepo:         &repo,
+		UpdatedAt:          now,
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got, _ := st.GetTask(ctx, "gr-uf01")
+	if got.Assignee != "bob" {
+		t.Fatalf("expected assignee 'bob', got %q", got.Assignee)
+	}
+	if got.Notes != "updated notes" {
+		t.Fatalf("expected notes 'updated notes', got %q", got.Notes)
+	}
+	if got.Design != "new design" {
+		t.Fatalf("expected design 'new design', got %q", got.Design)
+	}
+	if got.AcceptanceCriteria != "acceptance criteria" {
+		t.Fatalf("expected ac 'acceptance criteria', got %q", got.AcceptanceCriteria)
+	}
+	if got.SourceRepo != "github.com/updated" {
+		t.Fatalf("expected source_repo 'github.com/updated', got %q", got.SourceRepo)
+	}
+
+	// Clear a field by setting to empty string.
+	empty := ""
+	if err := st.UpdateTask(ctx, "gr-uf01", TaskUpdate{Assignee: &empty, UpdatedAt: now}); err != nil {
+		t.Fatalf("clear assignee: %v", err)
+	}
+
+	got, _ = st.GetTask(ctx, "gr-uf01")
+	if got.Assignee != "" {
+		t.Fatalf("expected empty assignee, got %q", got.Assignee)
+	}
+}
+
+func TestListTasksExtendedFilters(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	earlier := now.Add(-48 * time.Hour)
+
+	// Create test tasks with various fields.
+	tasks := []*models.Task{
+		{ID: "gr-ef01", Title: "Bug report", Status: "open", Type: "bug", Priority: 0, Assignee: "alice", Description: "a bug", CreatedAt: earlier, UpdatedAt: earlier},
+		{ID: "gr-ef02", Title: "Feature request", Status: "open", Type: "feature", Priority: 2, Assignee: "bob", Notes: "important notes", CreatedAt: now, UpdatedAt: now},
+		{ID: "gr-ef03", Title: "Unassigned task", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "gr-ef04", Title: "No description task", Status: "open", Type: "task", Priority: 1, Description: "", CreatedAt: now, UpdatedAt: now},
+	}
+
+	for _, task := range tasks {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	// Add labels to first two tasks only.
+	if err := st.AddLabels(ctx, "gr-ef01", []string{"critical"}); err != nil {
+		t.Fatalf("add labels: %v", err)
+	}
+	if err := st.AddLabels(ctx, "gr-ef02", []string{"enhancement"}); err != nil {
+		t.Fatalf("add labels: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		filter ListFilter
+		want   int
+	}{
+		{"by assignee", ListFilter{Assignee: "alice"}, 1},
+		{"no assignee", ListFilter{NoAssignee: true}, 2},
+		{"by ids", ListFilter{IDs: []string{"gr-ef01", "gr-ef03"}}, 2},
+		{"title contains", ListFilter{TitleContains: "Bug"}, 1},
+		{"desc contains", ListFilter{DescContains: "bug"}, 1},
+		{"notes contains", ListFilter{NotesContains: "important"}, 1},
+		{"created after", ListFilter{CreatedAfter: timePtr(earlier.Add(time.Hour))}, 3},
+		{"created before", ListFilter{CreatedBefore: timePtr(earlier.Add(time.Hour))}, 1},
+		{"empty description", ListFilter{EmptyDescription: true}, 3},
+		{"no labels", ListFilter{NoLabels: true}, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := st.ListTasks(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if len(result) != tt.want {
+				ids := make([]string, len(result))
+				for i, task := range result {
+					ids[i] = task.ID
+				}
+				t.Fatalf("expected %d tasks, got %d: %v", tt.want, len(result), ids)
+			}
+		})
+	}
+}
+
+func timePtr(t time.Time) *time.Time { return &t }
+
 func intPtr(v int) *int { return &v }

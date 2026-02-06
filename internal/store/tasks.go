@@ -12,18 +12,34 @@ import (
 	"grns/internal/models"
 )
 
+const taskColumns = "id, title, status, type, priority, description, spec_id, parent_id, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at, closed_at"
+
 type ListFilter struct {
-	Statuses    []string
-	Types       []string
-	Priority    *int
-	PriorityMin *int
-	PriorityMax *int
-	ParentID    string
-	Labels      []string
-	LabelsAny   []string
-	SpecRegex   string
-	Limit       int
-	Offset      int
+	Statuses         []string
+	Types            []string
+	Priority         *int
+	PriorityMin      *int
+	PriorityMax      *int
+	ParentID         string
+	Labels           []string
+	LabelsAny        []string
+	SpecRegex        string
+	Assignee         string
+	NoAssignee       bool
+	IDs              []string
+	TitleContains    string
+	DescContains     string
+	NotesContains    string
+	CreatedAfter     *time.Time
+	CreatedBefore    *time.Time
+	UpdatedAfter     *time.Time
+	UpdatedBefore    *time.Time
+	ClosedAfter      *time.Time
+	ClosedBefore     *time.Time
+	EmptyDescription bool
+	NoLabels         bool
+	Limit            int
+	Offset           int
 }
 
 // CreateTask inserts a task with optional labels and dependencies.
@@ -44,8 +60,10 @@ func (s *Store) CreateTask(ctx context.Context, task *models.Task, labels []stri
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, title, status, type, priority, description, spec_id, parent_id, created_at, updated_at, closed_at, custom
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, title, status, type, priority, description, spec_id, parent_id,
+			assignee, notes, design, acceptance_criteria, source_repo,
+			created_at, updated_at, closed_at, custom
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.ID,
 		task.Title,
@@ -55,6 +73,11 @@ func (s *Store) CreateTask(ctx context.Context, task *models.Task, labels []stri
 		nullIfEmpty(task.Description),
 		nullIfEmpty(task.SpecID),
 		nullIfEmpty(task.ParentID),
+		nullIfEmpty(task.Assignee),
+		nullIfEmpty(task.Notes),
+		nullIfEmpty(task.Design),
+		nullIfEmpty(task.AcceptanceCriteria),
+		nullIfEmpty(task.SourceRepo),
 		dbFormatTime(task.CreatedAt),
 		dbFormatTime(task.UpdatedAt),
 		nullTime(task.ClosedAt),
@@ -77,7 +100,7 @@ func (s *Store) CreateTask(ctx context.Context, task *models.Task, labels []stri
 // GetTask returns a task by id.
 func (s *Store) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, title, status, type, priority, description, spec_id, parent_id, created_at, updated_at, closed_at
+		SELECT `+taskColumns+`
 		FROM tasks WHERE id = ?
 	`, id)
 	return scanTask(row)
@@ -119,6 +142,26 @@ func (s *Store) UpdateTask(ctx context.Context, id string, update TaskUpdate) er
 	if update.ParentID != nil {
 		set = append(set, "parent_id = ?")
 		args = append(args, nullIfEmpty(*update.ParentID))
+	}
+	if update.Assignee != nil {
+		set = append(set, "assignee = ?")
+		args = append(args, nullIfEmpty(*update.Assignee))
+	}
+	if update.Notes != nil {
+		set = append(set, "notes = ?")
+		args = append(args, nullIfEmpty(*update.Notes))
+	}
+	if update.Design != nil {
+		set = append(set, "design = ?")
+		args = append(args, nullIfEmpty(*update.Design))
+	}
+	if update.AcceptanceCriteria != nil {
+		set = append(set, "acceptance_criteria = ?")
+		args = append(args, nullIfEmpty(*update.AcceptanceCriteria))
+	}
+	if update.SourceRepo != nil {
+		set = append(set, "source_repo = ?")
+		args = append(args, nullIfEmpty(*update.SourceRepo))
 	}
 	if update.ClosedAt != nil {
 		set = append(set, "closed_at = ?")
@@ -175,7 +218,7 @@ func (s *Store) ListTasks(ctx context.Context, filter ListFilter) ([]models.Task
 func (s *Store) ListReadyTasks(ctx context.Context, limit int) ([]models.Task, error) {
 	args := []any{}
 	query := `
-		SELECT id, title, status, type, priority, description, spec_id, parent_id, created_at, updated_at, closed_at
+		SELECT ` + taskColumns + `
 		FROM tasks t
 		WHERE t.status IN ('open', 'in_progress', 'blocked', 'deferred', 'pinned')
 		AND NOT EXISTS (
@@ -224,7 +267,7 @@ func (s *Store) ListStaleTasks(ctx context.Context, cutoff time.Time, statuses [
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, title, status, type, priority, description, spec_id, parent_id, created_at, updated_at, closed_at
+		SELECT `+taskColumns+`
 		FROM tasks
 		WHERE %s
 		ORDER BY updated_at ASC
@@ -403,19 +446,24 @@ func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.T
 
 // TaskUpdate describes fields to update.
 type TaskUpdate struct {
-	Title       *string
-	Status      *string
-	Type        *string
-	Priority    *int
-	Description *string
-	SpecID      *string
-	ParentID    *string
-	ClosedAt    *time.Time
-	UpdatedAt   time.Time
+	Title              *string
+	Status             *string
+	Type               *string
+	Priority           *int
+	Description        *string
+	SpecID             *string
+	ParentID           *string
+	Assignee           *string
+	Notes              *string
+	Design             *string
+	AcceptanceCriteria *string
+	SourceRepo         *string
+	ClosedAt           *time.Time
+	UpdatedAt          time.Time
 }
 
 func buildListQuery(filter ListFilter) (string, []any) {
-	query := "SELECT id, title, status, type, priority, description, spec_id, parent_id, created_at, updated_at, closed_at FROM tasks"
+	query := "SELECT " + taskColumns + " FROM tasks"
 	where := []string{}
 	args := []any{}
 
@@ -458,6 +506,61 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		for _, label := range filter.LabelsAny {
 			args = append(args, label)
 		}
+	}
+	if filter.Assignee != "" {
+		where = append(where, "assignee = ?")
+		args = append(args, filter.Assignee)
+	}
+	if filter.NoAssignee {
+		where = append(where, "(assignee IS NULL OR assignee = '')")
+	}
+	if len(filter.IDs) > 0 {
+		where = append(where, fmt.Sprintf("id IN (%s)", placeholders(len(filter.IDs))))
+		for _, id := range filter.IDs {
+			args = append(args, id)
+		}
+	}
+	if filter.TitleContains != "" {
+		where = append(where, "title LIKE '%' || ? || '%'")
+		args = append(args, filter.TitleContains)
+	}
+	if filter.DescContains != "" {
+		where = append(where, "description LIKE '%' || ? || '%'")
+		args = append(args, filter.DescContains)
+	}
+	if filter.NotesContains != "" {
+		where = append(where, "notes LIKE '%' || ? || '%'")
+		args = append(args, filter.NotesContains)
+	}
+	if filter.CreatedAfter != nil {
+		where = append(where, "created_at > ?")
+		args = append(args, dbFormatTime(*filter.CreatedAfter))
+	}
+	if filter.CreatedBefore != nil {
+		where = append(where, "created_at < ?")
+		args = append(args, dbFormatTime(*filter.CreatedBefore))
+	}
+	if filter.UpdatedAfter != nil {
+		where = append(where, "updated_at > ?")
+		args = append(args, dbFormatTime(*filter.UpdatedAfter))
+	}
+	if filter.UpdatedBefore != nil {
+		where = append(where, "updated_at < ?")
+		args = append(args, dbFormatTime(*filter.UpdatedBefore))
+	}
+	if filter.ClosedAfter != nil {
+		where = append(where, "closed_at > ?")
+		args = append(args, dbFormatTime(*filter.ClosedAfter))
+	}
+	if filter.ClosedBefore != nil {
+		where = append(where, "closed_at < ?")
+		args = append(args, dbFormatTime(*filter.ClosedBefore))
+	}
+	if filter.EmptyDescription {
+		where = append(where, "(description IS NULL OR description = '')")
+	}
+	if filter.NoLabels {
+		where = append(where, "id NOT IN (SELECT task_id FROM task_labels)")
 	}
 
 	if len(where) > 0 {
@@ -512,6 +615,7 @@ func scanTask(scanner interface{
 }) (*models.Task, error) {
 	var task models.Task
 	var description, specID, parentID sql.NullString
+	var assignee, notes, design, acceptanceCriteria, sourceRepo sql.NullString
 	var createdAt, updatedAt string
 	var closedAt sql.NullString
 
@@ -524,6 +628,11 @@ func scanTask(scanner interface{
 		&description,
 		&specID,
 		&parentID,
+		&assignee,
+		&notes,
+		&design,
+		&acceptanceCriteria,
+		&sourceRepo,
 		&createdAt,
 		&updatedAt,
 		&closedAt,
@@ -537,6 +646,11 @@ func scanTask(scanner interface{
 	task.Description = description.String
 	task.SpecID = specID.String
 	task.ParentID = parentID.String
+	task.Assignee = assignee.String
+	task.Notes = notes.String
+	task.Design = design.String
+	task.AcceptanceCriteria = acceptanceCriteria.String
+	task.SourceRepo = sourceRepo.String
 
 	parsedCreated, err := dbParseTime(createdAt)
 	if err != nil {
