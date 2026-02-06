@@ -1,0 +1,26 @@
+load 'helpers.bash'
+
+@test "cli autospawns server when api is not running" {
+  port="$(get_free_port)"
+  export GRNS_API_URL="http://127.0.0.1:${port}"
+
+  run "$GRNS_BIN" create "Autospawn issue" -t task -p 1 --json
+  [ "$status" -eq 0 ]
+
+  id="$(printf '%s' "$output" | json_get id)"
+  [ -n "$id" ]
+}
+
+@test "cli errors when api url points to non-grns service" {
+  port="$(get_free_port)"
+  python3 -m http.server "$port" >/dev/null 2>&1 &
+  GRNS_TEST_HTTP_PID=$!
+  export GRNS_TEST_HTTP_PID
+  export GRNS_API_URL="http://127.0.0.1:${port}"
+
+  sleep 0.2
+
+  run "$GRNS_BIN" create "Bad api" -t task -p 1 --json
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "api error"
+}
