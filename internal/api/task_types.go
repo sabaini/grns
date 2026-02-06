@@ -17,6 +17,7 @@ type TaskCreateRequest struct {
 	Design             *string             `json:"design,omitempty"`
 	AcceptanceCriteria *string             `json:"acceptance_criteria,omitempty"`
 	SourceRepo         *string             `json:"source_repo,omitempty"`
+	Custom             map[string]any      `json:"custom,omitempty"`
 	Labels             []string            `json:"labels,omitempty"`
 	Deps               []models.Dependency `json:"deps,omitempty"`
 }
@@ -34,7 +35,36 @@ type TaskUpdateRequest struct {
 	Notes              *string `json:"notes,omitempty"`
 	Design             *string `json:"design,omitempty"`
 	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
-	SourceRepo         *string `json:"source_repo,omitempty"`
+	SourceRepo         *string        `json:"source_repo,omitempty"`
+	Custom             map[string]any `json:"custom,omitempty"`
+}
+
+// InfoResponse is the response from GET /v1/info.
+type InfoResponse struct {
+	DBPath        string         `json:"db_path"`
+	ProjectPrefix string         `json:"project_prefix"`
+	SchemaVersion int            `json:"schema_version"`
+	TaskCounts    map[string]int `json:"task_counts"`
+	TotalTasks    int            `json:"total_tasks"`
+}
+
+// DepTreeResponse wraps the dependency tree output.
+type DepTreeResponse struct {
+	RootID string              `json:"root_id"`
+	Nodes  []models.DepTreeNode `json:"nodes"`
+}
+
+// CleanupRequest defines the payload for admin cleanup.
+type CleanupRequest struct {
+	OlderThanDays int  `json:"older_than_days"`
+	DryRun        bool `json:"dry_run"`
+}
+
+// CleanupResponse is the response from POST /v1/admin/cleanup.
+type CleanupResponse struct {
+	TaskIDs []string `json:"task_ids"`
+	Count   int      `json:"count"`
+	DryRun  bool     `json:"dry_run"`
 }
 
 // TaskCloseRequest defines the payload for closing tasks.
@@ -64,4 +94,30 @@ type TaskResponse struct {
 	models.Task
 	Labels []string            `json:"labels"`
 	Deps   []models.Dependency `json:"deps,omitempty"`
+}
+
+// TaskImportRecord represents one task in an import payload.
+type TaskImportRecord struct {
+	models.Task
+	Labels []string            `json:"labels,omitempty"`
+	Deps   []models.Dependency `json:"deps,omitempty"`
+}
+
+// ImportRequest is the payload for POST /v1/import.
+type ImportRequest struct {
+	Tasks          []TaskImportRecord `json:"tasks"`
+	DryRun         bool               `json:"dry_run"`
+	Dedupe         string             `json:"dedupe"`
+	OrphanHandling string             `json:"orphan_handling"`
+}
+
+// ImportResponse is the response from POST /v1/import.
+type ImportResponse struct {
+	Created  int      `json:"created"`
+	Updated  int      `json:"updated"`
+	Skipped  int      `json:"skipped"`
+	Errors   int      `json:"errors"`
+	DryRun   bool     `json:"dry_run"`
+	TaskIDs  []string `json:"task_ids"`
+	Messages []string `json:"messages,omitempty"`
 }

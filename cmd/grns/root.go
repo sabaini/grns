@@ -30,6 +30,11 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 		newDepCmd(cfg, &jsonOutput),
 		newLabelCmd(cfg, &jsonOutput),
 		newMigrateCmd(cfg, &jsonOutput),
+		newInfoCmd(cfg, &jsonOutput),
+		newAdminCmd(cfg, &jsonOutput),
+		newExportCmd(cfg, &jsonOutput),
+		newImportCmd(cfg, &jsonOutput),
+		newConfigCmd(cfg),
 	)
 
 	return cmd

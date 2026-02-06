@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"grns/internal/api"
+	"grns/internal/models"
 	"grns/internal/store"
 )
 
@@ -21,6 +22,45 @@ const (
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := s.store.StoreInfo(r.Context())
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	resp := api.InfoResponse{
+		ProjectPrefix: s.projectPrefix,
+		SchemaVersion: info.SchemaVersion,
+		TaskCounts:    info.TaskCounts,
+		TotalTasks:    info.TotalTasks,
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
+	nodes, err := s.store.DependencyTree(r.Context(), id)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if nodes == nil {
+		nodes = []models.DepTreeNode{}
+	}
+
+	s.writeJSON(w, http.StatusOK, api.DepTreeResponse{
+		RootID: id,
+		Nodes:  nodes,
+	})
 }
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +177,125 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{"child_id": childID, "parent_id": parentID, "type": depType})
+}
+
+func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
+	var req api.CleanupRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.OlderThanDays <= 0 {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("older_than_days must be > 0"))
+		return
+	}
+	if !req.DryRun && r.Header.Get("X-Confirm") != "true" {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("non-dry-run requires X-Confirm: true header"))
+		return
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
+	result, err := s.store.CleanupClosedTasks(r.Context(), cutoff, req.DryRun)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	resp := api.CleanupResponse{
+		TaskIDs: result.TaskIDs,
+		Count:   result.Count,
+		DryRun:  result.DryRun,
+	}
+	if resp.TaskIDs == nil {
+		resp.TaskIDs = []string{}
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Fetch all tasks.
+	tasks, err := s.store.ListTasks(ctx, store.ListFilter{})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(tasks) == 0 {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Bulk fetch labels and deps.
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+
+	for _, t := range tasks {
+		labels := labelMap[t.ID]
+		if labels == nil {
+			labels = []string{}
+		}
+		deps := depMap[t.ID]
+		record := api.TaskResponse{Task: t, Labels: labels, Deps: deps}
+		_ = enc.Encode(record)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	var req api.ImportRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// Validate dedupe.
+	switch req.Dedupe {
+	case "", "skip", "overwrite", "error":
+	default:
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", req.Dedupe))
+		return
+	}
+	// Validate orphan handling.
+	switch req.OrphanHandling {
+	case "", "allow", "skip", "strict":
+	default:
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", req.OrphanHandling))
+		return
+	}
+
+	if len(req.Tasks) == 0 {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("tasks array is required"))
+		return
+	}
+
+	resp, err := s.service.Import(r.Context(), req)
+	if err != nil {
+		s.writeError(w, httpStatusFromError(err), err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
@@ -396,6 +555,9 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("no_labels") == "true" {
 		filter.NoLabels = true
+	}
+	if search := strings.TrimSpace(r.URL.Query().Get("search")); search != "" {
+		filter.SearchQuery = search
 	}
 
 	spec := strings.TrimSpace(r.URL.Query().Get("spec"))

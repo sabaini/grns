@@ -19,5 +19,6 @@ type Task struct {
 	SourceRepo         string    `json:"source_repo,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	ClosedAt    *time.Time     `json:"closed_at,omitempty"`
+	Custom      map[string]any `json:"custom,omitempty"`
 }

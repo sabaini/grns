@@ -119,6 +119,7 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 		Design:             valueOrEmpty(req.Design),
 		AcceptanceCriteria: valueOrEmpty(req.AcceptanceCriteria),
 		SourceRepo:         valueOrEmpty(req.SourceRepo),
+		Custom:             req.Custom,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -204,6 +205,10 @@ func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateR
 	if req.SourceRepo != nil {
 		update.SourceRepo = req.SourceRepo
 	}
+	if req.Custom != nil {
+		custom := req.Custom
+		update.Custom = &custom
+	}
 
 	if err := s.store.UpdateTask(ctx, id, update); err != nil {
 		return resp, err
@@ -274,6 +279,136 @@ func (s *TaskService) Close(ctx context.Context, ids []string) error {
 func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
 	now := time.Now().UTC()
 	return s.store.ReopenTasks(ctx, ids, now)
+}
+
+// Import processes an import request (two-pass: tasks first, then deps).
+func (s *TaskService) Import(ctx context.Context, req api.ImportRequest) (api.ImportResponse, error) {
+	resp := api.ImportResponse{DryRun: req.DryRun, TaskIDs: []string{}}
+
+	dedupe := req.Dedupe
+	if dedupe == "" {
+		dedupe = "skip"
+	}
+	orphan := req.OrphanHandling
+	if orphan == "" {
+		orphan = "allow"
+	}
+
+	// Pass 1: create or update tasks.
+	importIDs := make(map[string]bool, len(req.Tasks))
+	for _, rec := range req.Tasks {
+		importIDs[rec.ID] = true
+	}
+
+	for _, rec := range req.Tasks {
+		if rec.ID == "" || rec.Title == "" {
+			resp.Errors++
+			resp.Messages = append(resp.Messages, fmt.Sprintf("skipping record with missing id or title"))
+			continue
+		}
+
+		exists, err := s.store.TaskExists(rec.ID)
+		if err != nil {
+			return resp, err
+		}
+
+		if exists {
+			switch dedupe {
+			case "skip":
+				resp.Skipped++
+				resp.TaskIDs = append(resp.TaskIDs, rec.ID)
+				continue
+			case "error":
+				resp.Errors++
+				resp.Messages = append(resp.Messages, fmt.Sprintf("duplicate id: %s", rec.ID))
+				continue
+			case "overwrite":
+				if !req.DryRun {
+					update := store.TaskUpdate{
+						Title:              &rec.Title,
+						Status:             &rec.Status,
+						Type:               &rec.Type,
+						Priority:           &rec.Priority,
+						Description:        &rec.Description,
+						SpecID:             &rec.SpecID,
+						ParentID:           &rec.ParentID,
+						Assignee:           &rec.Assignee,
+						Notes:              &rec.Notes,
+						Design:             &rec.Design,
+						AcceptanceCriteria: &rec.AcceptanceCriteria,
+						SourceRepo:         &rec.SourceRepo,
+						UpdatedAt:          rec.UpdatedAt,
+					}
+					if rec.Custom != nil {
+						custom := rec.Custom
+						update.Custom = &custom
+					}
+					if err := s.store.UpdateTask(ctx, rec.ID, update); err != nil {
+						return resp, err
+					}
+					if rec.Labels != nil {
+						if err := s.store.ReplaceLabels(ctx, rec.ID, rec.Labels); err != nil {
+							return resp, err
+						}
+					}
+				}
+				resp.Updated++
+				resp.TaskIDs = append(resp.TaskIDs, rec.ID)
+			}
+		} else {
+			if !req.DryRun {
+				task := rec.Task
+				if err := s.store.CreateTask(ctx, &task, rec.Labels, nil); err != nil {
+					return resp, err
+				}
+			}
+			resp.Created++
+			resp.TaskIDs = append(resp.TaskIDs, rec.ID)
+		}
+	}
+
+	// Pass 2: insert dependencies.
+	if !req.DryRun {
+		for _, rec := range req.Tasks {
+			if len(rec.Deps) == 0 {
+				continue
+			}
+			// Remove existing deps first for overwritten tasks.
+			if err := s.store.RemoveDependencies(ctx, rec.ID); err != nil {
+				return resp, err
+			}
+			for _, dep := range rec.Deps {
+				if dep.ParentID == "" {
+					continue
+				}
+				// Orphan handling: check if parent exists.
+				if orphan != "allow" {
+					inBatch := importIDs[dep.ParentID]
+					exists, err := s.store.TaskExists(dep.ParentID)
+					if err != nil {
+						return resp, err
+					}
+					if !exists && !inBatch {
+						if orphan == "strict" {
+							return resp, badRequest(fmt.Errorf("orphan dependency: %s depends on unknown %s", rec.ID, dep.ParentID))
+						}
+						// skip
+						resp.Messages = append(resp.Messages, fmt.Sprintf("skipped orphan dep: %s -> %s", rec.ID, dep.ParentID))
+						continue
+					}
+				}
+				depType := dep.Type
+				if depType == "" {
+					depType = "blocks"
+				}
+				if err := s.store.AddDependency(ctx, rec.ID, dep.ParentID, depType); err != nil {
+					return resp, err
+				}
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 func (s *TaskService) attachLabels(ctx context.Context, tasks []models.Task) ([]api.TaskResponse, error) {

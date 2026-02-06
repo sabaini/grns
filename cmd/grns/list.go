@@ -34,6 +34,7 @@ func newListCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		closedBefore     string
 		emptyDescription bool
 		noLabels         bool
+		search           string
 		limit            int
 		offset           int
 	)
@@ -73,6 +74,7 @@ func newListCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if noLabels {
 					query.Set("no_labels", "true")
 				}
+				setIfNotEmpty(query, "search", search)
 				if limit > 0 {
 					query.Set("limit", intToString(limit))
 				}
@@ -115,6 +117,7 @@ func newListCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().StringVar(&closedBefore, "closed-before", "", "closed before (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&emptyDescription, "empty-description", false, "tasks with no description")
 	cmd.Flags().BoolVar(&noLabels, "no-labels", false, "tasks with no labels")
+	cmd.Flags().StringVar(&search, "search", "", "full-text search query")
 	cmd.Flags().IntVar(&limit, "limit", 0, "limit results")
 	cmd.Flags().IntVar(&offset, "offset", 0, "offset results")
 

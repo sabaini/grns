@@ -29,6 +29,8 @@ func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		labels             []string
 		deps               string
 		filePath           string
+		customKV           []string
+		customJSON         string
 	)
 
 	cmd := &cobra.Command{
@@ -87,6 +89,13 @@ func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 					}
 					req.Deps = depList
 				}
+				if len(customKV) > 0 || customJSON != "" {
+					m, err := parseCustomFlags(customKV, customJSON)
+					if err != nil {
+						return err
+					}
+					req.Custom = m
+				}
 
 				resp, err := client.CreateTask(cmd.Context(), req)
 				if err != nil {
@@ -115,6 +124,8 @@ func newCreateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().StringSliceVar(&labels, "labels", nil, "labels")
 	cmd.Flags().StringVar(&deps, "deps", "", "dependencies")
 	cmd.Flags().StringVarP(&filePath, "file", "f", "", "markdown file for batch create")
+	cmd.Flags().StringSliceVar(&customKV, "custom", nil, "custom field key=value (repeatable)")
+	cmd.Flags().StringVar(&customJSON, "custom-json", "", "custom fields as JSON object")
 
 	return cmd
 }

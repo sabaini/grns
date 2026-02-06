@@ -7,8 +7,9 @@ import (
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Health check.
+	// Health check and info.
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /v1/info", s.handleInfo)
 
 	// Tasks collection.
 	mux.HandleFunc("POST /v1/tasks", s.handleCreateTask)
@@ -31,6 +32,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/tasks/{id}/labels", s.handleListTaskLabels)
 	mux.HandleFunc("POST /v1/tasks/{id}/labels", s.handleAddTaskLabels)
 	mux.HandleFunc("DELETE /v1/tasks/{id}/labels", s.handleRemoveTaskLabels)
+
+	// Dependency tree.
+	mux.HandleFunc("GET /v1/tasks/{id}/deps/tree", s.handleDepTree)
+
+	// Import/Export.
+	mux.HandleFunc("GET /v1/export", s.handleExport)
+	mux.HandleFunc("POST /v1/import", s.handleImport)
+
+	// Admin.
+	mux.HandleFunc("POST /v1/admin/cleanup", s.handleAdminCleanup)
 
 	// Dependencies and labels.
 	mux.HandleFunc("POST /v1/deps", s.handleDeps)

@@ -85,6 +85,37 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
 CREATE INDEX IF NOT EXISTS idx_tasks_source_repo ON tasks(source_repo);
 `,
 	},
+	{
+		Version:     3,
+		Description: "FTS5 full-text search on tasks",
+		SQL: `
+CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+	task_id UNINDEXED,
+	title,
+	description,
+	notes
+);
+
+INSERT INTO tasks_fts(task_id, title, description, notes)
+	SELECT id, title, COALESCE(description, ''), COALESCE(notes, '')
+	FROM tasks;
+
+CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks BEGIN
+	INSERT INTO tasks_fts(task_id, title, description, notes)
+		VALUES (new.id, new.title, COALESCE(new.description, ''), COALESCE(new.notes, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks BEGIN
+	DELETE FROM tasks_fts WHERE task_id = old.id;
+	INSERT INTO tasks_fts(task_id, title, description, notes)
+		VALUES (new.id, new.title, COALESCE(new.description, ''), COALESCE(new.notes, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks BEGIN
+	DELETE FROM tasks_fts WHERE task_id = old.id;
+END;
+`,
+	},
 }
 
 const migrationsTableSQL = `

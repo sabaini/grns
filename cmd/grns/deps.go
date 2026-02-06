@@ -49,7 +49,41 @@ func newDepCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	}
 	addCmd.Flags().String("type", "", "dependency type")
 
-	depCmd.AddCommand(addCmd)
+	treeCmd := &cobra.Command{
+		Use:   "tree <id>",
+		Short: "Show full dependency tree for a task",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return errors.New("task id is required")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withClient(cfg, func(client *api.Client) error {
+				resp, err := client.DependencyTree(cmd.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				if *jsonOutput {
+					return writeJSON(resp)
+				}
+				if len(resp.Nodes) == 0 {
+					return writePlain("No dependencies for %s\n", args[0])
+				}
+				for _, node := range resp.Nodes {
+					indent := strings.Repeat("  ", node.Depth)
+					arrow := "^"
+					if node.Direction == "downstream" {
+						arrow = "v"
+					}
+					_ = writePlain("%s%s %s [%s] %s (%s)\n", indent, arrow, node.ID, node.Status, node.Title, node.DepType)
+				}
+				return nil
+			})
+		},
+	}
+
+	depCmd.AddCommand(addCmd, treeCmd)
 	return depCmd
 }
 

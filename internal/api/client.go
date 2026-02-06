@@ -33,6 +33,12 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/health", nil, nil, nil)
 }
 
+func (c *Client) GetInfo(ctx context.Context) (InfoResponse, error) {
+	var resp InfoResponse
+	err := c.do(ctx, http.MethodGet, "/v1/info", nil, nil, &resp)
+	return resp, err
+}
+
 func (c *Client) CreateTask(ctx context.Context, req TaskCreateRequest) (TaskResponse, error) {
 	var resp TaskResponse
 	err := c.do(ctx, http.MethodPost, "/v1/tasks", nil, req, &resp)
@@ -85,6 +91,63 @@ func (c *Client) ReopenTasks(ctx context.Context, req TaskReopenRequest) (map[st
 	var resp map[string]any
 	err := c.do(ctx, http.MethodPost, "/v1/tasks/reopen", nil, req, &resp)
 	return resp, err
+}
+
+func (c *Client) DependencyTree(ctx context.Context, id string) (DepTreeResponse, error) {
+	var resp DepTreeResponse
+	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(id)+"/deps/tree", nil, nil, &resp)
+	return resp, err
+}
+
+func (c *Client) AdminCleanup(ctx context.Context, req CleanupRequest, confirm bool) (CleanupResponse, error) {
+	var resp CleanupResponse
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return resp, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/admin/cleanup", bytes.NewReader(payload))
+	if err != nil {
+		return resp, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if confirm {
+		httpReq.Header.Set("X-Confirm", "true")
+	}
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	err = json.NewDecoder(httpResp.Body).Decode(&resp)
+	return resp, err
+}
+
+// Import sends an import request.
+func (c *Client) Import(ctx context.Context, req ImportRequest) (ImportResponse, error) {
+	var resp ImportResponse
+	err := c.do(ctx, http.MethodPost, "/v1/import", nil, req, &resp)
+	return resp, err
+}
+
+// Export streams NDJSON export to a writer.
+func (c *Client) Export(ctx context.Context, w io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/export", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return decodeError(resp)
+	}
+	_, err = io.Copy(w, resp.Body)
+	return err
 }
 
 func (c *Client) AddDependency(ctx context.Context, req DepCreateRequest) (map[string]any, error) {

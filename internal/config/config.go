@@ -47,6 +47,79 @@ func loadFile(path string, cfg *Config) error {
 	return nil
 }
 
+var allowedKeys = []string{"project_prefix", "api_url", "db_path"}
+
+// AllowedKeys returns the set of valid config keys.
+func AllowedKeys() []string {
+	return allowedKeys
+}
+
+// IsAllowedKey checks if a key is a valid config key.
+func IsAllowedKey(key string) bool {
+	for _, k := range allowedKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// Get returns the value of a config key.
+func (c *Config) Get(key string) (string, error) {
+	switch key {
+	case "project_prefix":
+		return c.ProjectPrefix, nil
+	case "api_url":
+		return c.APIURL, nil
+	case "db_path":
+		return c.DBPath, nil
+	default:
+		return "", fmt.Errorf("unknown key: %s", key)
+	}
+}
+
+// GlobalPath returns the path to the global config file.
+func GlobalPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".grns.toml"), nil
+}
+
+// ProjectPath returns the path to the project config file.
+func ProjectPath() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cwd, ".grns.toml"), nil
+}
+
+// SetKey reads the TOML file at path, sets key=value, and writes it back.
+func SetKey(path, key, value string) error {
+	if !IsAllowedKey(key) {
+		return fmt.Errorf("unknown key: %s", key)
+	}
+
+	data := make(map[string]interface{})
+	if _, err := os.Stat(path); err == nil {
+		if _, err := toml.DecodeFile(path, &data); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+
+	data[key] = value
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return toml.NewEncoder(f).Encode(data)
+}
+
 // Load reads config from global and project files and applies env overrides.
 func Load() (*Config, error) {
 	cfg := Default()

@@ -24,6 +24,8 @@ func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		design             string
 		acceptanceCriteria string
 		sourceRepo         string
+		customKV           []string
+		customJSON         string
 	)
 
 	cmd := &cobra.Command{
@@ -74,8 +76,15 @@ func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if cmd.Flags().Changed("source-repo") {
 					req.SourceRepo = &sourceRepo
 				}
+				if len(customKV) > 0 || customJSON != "" {
+					m, err := parseCustomFlags(customKV, customJSON)
+					if err != nil {
+						return err
+					}
+					req.Custom = m
+				}
 
-				if req.Title == nil && req.Status == nil && req.Type == nil && req.Priority == nil && req.Description == nil && req.SpecID == nil && req.ParentID == nil && req.Assignee == nil && req.Notes == nil && req.Design == nil && req.AcceptanceCriteria == nil && req.SourceRepo == nil {
+				if req.Title == nil && req.Status == nil && req.Type == nil && req.Priority == nil && req.Description == nil && req.SpecID == nil && req.ParentID == nil && req.Assignee == nil && req.Notes == nil && req.Design == nil && req.AcceptanceCriteria == nil && req.SourceRepo == nil && req.Custom == nil {
 					return errors.New("no fields to update")
 				}
 
@@ -110,6 +119,8 @@ func newUpdateCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().StringVar(&design, "design", "", "design")
 	cmd.Flags().StringVar(&acceptanceCriteria, "acceptance", "", "acceptance criteria")
 	cmd.Flags().StringVar(&sourceRepo, "source-repo", "", "source repository")
+	cmd.Flags().StringSliceVar(&customKV, "custom", nil, "custom field key=value (repeatable)")
+	cmd.Flags().StringVar(&customJSON, "custom-json", "", "custom fields as JSON object")
 
 	return cmd
 }

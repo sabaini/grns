@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -12,7 +13,8 @@ import (
 	"grns/internal/models"
 )
 
-const taskColumns = "id, title, status, type, priority, description, spec_id, parent_id, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at, closed_at"
+const taskColumns = "id, title, status, type, priority, description, spec_id, parent_id, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at, closed_at, custom"
+const qualifiedTaskColumns = "tasks.id, tasks.title, tasks.status, tasks.type, tasks.priority, tasks.description, tasks.spec_id, tasks.parent_id, tasks.assignee, tasks.notes, tasks.design, tasks.acceptance_criteria, tasks.source_repo, tasks.created_at, tasks.updated_at, tasks.closed_at, tasks.custom"
 
 type ListFilter struct {
 	Statuses         []string
@@ -38,6 +40,7 @@ type ListFilter struct {
 	ClosedBefore     *time.Time
 	EmptyDescription bool
 	NoLabels         bool
+	SearchQuery      string
 	Limit            int
 	Offset           int
 }
@@ -81,7 +84,7 @@ func (s *Store) CreateTask(ctx context.Context, task *models.Task, labels []stri
 		dbFormatTime(task.CreatedAt),
 		dbFormatTime(task.UpdatedAt),
 		nullTime(task.ClosedAt),
-		nil,
+		customToJSON(task.Custom),
 	)
 	if err != nil {
 		return err
@@ -166,6 +169,10 @@ func (s *Store) UpdateTask(ctx context.Context, id string, update TaskUpdate) er
 	if update.ClosedAt != nil {
 		set = append(set, "closed_at = ?")
 		args = append(args, nullTime(update.ClosedAt))
+	}
+	if update.Custom != nil {
+		set = append(set, "custom = ?")
+		args = append(args, customToJSON(*update.Custom))
 	}
 
 	set = append(set, "updated_at = ?")
@@ -414,6 +421,61 @@ func (s *Store) ListLabelsForTasks(ctx context.Context, ids []string) (map[strin
 	return labels, rows.Err()
 }
 
+// ListDependenciesForTasks returns dependencies keyed by child task id.
+func (s *Store) ListDependenciesForTasks(ctx context.Context, ids []string) (map[string][]models.Dependency, error) {
+	deps := make(map[string][]models.Dependency)
+	if len(ids) == 0 {
+		return deps, nil
+	}
+
+	query := fmt.Sprintf("SELECT child_id, parent_id, type FROM task_deps WHERE child_id IN (%s)", placeholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var childID, parentID, depType string
+		if err := rows.Scan(&childID, &parentID, &depType); err != nil {
+			return nil, err
+		}
+		deps[childID] = append(deps[childID], models.Dependency{ParentID: parentID, Type: depType})
+	}
+	return deps, rows.Err()
+}
+
+// ReplaceLabels replaces all labels for a task.
+func (s *Store) ReplaceLabels(ctx context.Context, id string, labels []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(ctx, "DELETE FROM task_labels WHERE task_id = ?", id); err != nil {
+		return err
+	}
+	if err = insertLabels(ctx, tx, id, labels); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RemoveDependencies removes all dependencies where the task is a child.
+func (s *Store) RemoveDependencies(ctx context.Context, childID string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM task_deps WHERE child_id = ?", childID)
+	return err
+}
+
 // CloseTasks closes tasks and sets closed_at.
 func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time) error {
 	if len(ids) == 0 {
@@ -459,13 +521,18 @@ type TaskUpdate struct {
 	AcceptanceCriteria *string
 	SourceRepo         *string
 	ClosedAt           *time.Time
+	Custom             *map[string]any
 	UpdatedAt          time.Time
 }
 
 func buildListQuery(filter ListFilter) (string, []any) {
-	query := "SELECT " + taskColumns + " FROM tasks"
-	where := []string{}
 	args := []any{}
+	query := "SELECT " + taskColumns + " FROM tasks"
+	if filter.SearchQuery != "" {
+		query = "SELECT " + qualifiedTaskColumns + " FROM tasks JOIN tasks_fts ON tasks.id = tasks_fts.task_id AND tasks_fts MATCH ?"
+		args = append(args, filter.SearchQuery)
+	}
+	where := []string{}
 
 	if len(filter.Statuses) > 0 {
 		where = append(where, fmt.Sprintf("status IN (%s)", placeholders(len(filter.Statuses))))
@@ -521,15 +588,15 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		}
 	}
 	if filter.TitleContains != "" {
-		where = append(where, "title LIKE '%' || ? || '%'")
+		where = append(where, "tasks.title LIKE '%' || ? || '%'")
 		args = append(args, filter.TitleContains)
 	}
 	if filter.DescContains != "" {
-		where = append(where, "description LIKE '%' || ? || '%'")
+		where = append(where, "tasks.description LIKE '%' || ? || '%'")
 		args = append(args, filter.DescContains)
 	}
 	if filter.NotesContains != "" {
-		where = append(where, "notes LIKE '%' || ? || '%'")
+		where = append(where, "tasks.notes LIKE '%' || ? || '%'")
 		args = append(args, filter.NotesContains)
 	}
 	if filter.CreatedAfter != nil {
@@ -557,7 +624,7 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		args = append(args, dbFormatTime(*filter.ClosedBefore))
 	}
 	if filter.EmptyDescription {
-		where = append(where, "(description IS NULL OR description = '')")
+		where = append(where, "(tasks.description IS NULL OR tasks.description = '')")
 	}
 	if filter.NoLabels {
 		where = append(where, "id NOT IN (SELECT task_id FROM task_labels)")
@@ -567,7 +634,11 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
 
-	query += " ORDER BY updated_at DESC"
+	if filter.SearchQuery != "" {
+		query += " ORDER BY tasks_fts.rank"
+	} else {
+		query += " ORDER BY updated_at DESC"
+	}
 
 	if filter.SpecRegex == "" && filter.Limit > 0 {
 		query += " LIMIT ?"
@@ -617,7 +688,7 @@ func scanTask(scanner interface{
 	var description, specID, parentID sql.NullString
 	var assignee, notes, design, acceptanceCriteria, sourceRepo sql.NullString
 	var createdAt, updatedAt string
-	var closedAt sql.NullString
+	var closedAt, customJSON sql.NullString
 
 	if err := scanner.Scan(
 		&task.ID,
@@ -636,6 +707,7 @@ func scanTask(scanner interface{
 		&createdAt,
 		&updatedAt,
 		&closedAt,
+		&customJSON,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -669,6 +741,11 @@ func scanTask(scanner interface{
 		}
 		task.ClosedAt = &parsedClosed
 	}
+	if customJSON.Valid && customJSON.String != "" {
+		if err := json.Unmarshal([]byte(customJSON.String), &task.Custom); err != nil {
+			return nil, fmt.Errorf("parse custom JSON: %w", err)
+		}
+	}
 
 	return &task, nil
 }
@@ -685,6 +762,17 @@ func nullIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+func customToJSON(m map[string]any) any {
+	if len(m) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return string(data)
 }
 
 func nullTime(value *time.Time) any {
@@ -727,6 +815,132 @@ func insertLabels(ctx context.Context, tx *sql.Tx, id string, labels []string) e
 	}
 	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO task_labels (task_id, label) VALUES "+labelValues(len(labels)), labelArgs(id, labels)...)
 	return err
+}
+
+// DependencyTree returns the full dependency graph for a task.
+func (s *Store) DependencyTree(ctx context.Context, id string) ([]models.DepTreeNode, error) {
+	query := `
+		WITH RECURSIVE
+		upstream(id, depth, dep_type, path) AS (
+			SELECT parent_id, 1, type, ',' || ? || ',' || parent_id || ','
+			FROM task_deps WHERE child_id = ?
+			UNION ALL
+			SELECT d.parent_id, u.depth + 1, d.type, u.path || d.parent_id || ','
+			FROM task_deps d
+			JOIN upstream u ON d.child_id = u.id
+			WHERE u.depth < 50
+			AND INSTR(u.path, ',' || d.parent_id || ',') = 0
+		),
+		downstream(id, depth, dep_type, path) AS (
+			SELECT child_id, 1, type, ',' || ? || ',' || child_id || ','
+			FROM task_deps WHERE parent_id = ?
+			UNION ALL
+			SELECT d.child_id, dn.depth + 1, d.type, dn.path || d.child_id || ','
+			FROM task_deps d
+			JOIN downstream dn ON d.parent_id = dn.id
+			WHERE dn.depth < 50
+			AND INSTR(dn.path, ',' || d.child_id || ',') = 0
+		)
+		SELECT t.id, t.title, t.status, t.type, u.depth, 'upstream' AS direction, u.dep_type
+		FROM upstream u
+		JOIN tasks t ON t.id = u.id
+		UNION ALL
+		SELECT t.id, t.title, t.status, t.type, d.depth, 'downstream' AS direction, d.dep_type
+		FROM downstream d
+		JOIN tasks t ON t.id = d.id
+		ORDER BY 6, 5, 1
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, id, id, id, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []models.DepTreeNode
+	for rows.Next() {
+		var node models.DepTreeNode
+		if err := rows.Scan(&node.ID, &node.Title, &node.Status, &node.Type, &node.Depth, &node.Direction, &node.DepType); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+// StoreInfo returns metadata about the database.
+func (s *Store) StoreInfo(ctx context.Context) (*StoreInfo, error) {
+	info := &StoreInfo{
+		TaskCounts: make(map[string]int),
+	}
+
+	var version int
+	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
+		return nil, err
+	}
+	info.SchemaVersion = version
+
+	rows, err := s.db.QueryContext(ctx, "SELECT status, COUNT(*) FROM tasks GROUP BY status")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	total := 0
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		info.TaskCounts[status] = count
+		total += count
+	}
+	info.TotalTasks = total
+
+	return info, rows.Err()
+}
+
+// CleanupClosedTasks removes (or reports) closed tasks older than cutoff.
+func (s *Store) CleanupClosedTasks(ctx context.Context, cutoff time.Time, dryRun bool) (*CleanupResult, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id FROM tasks WHERE status = 'closed' AND updated_at < ?", dbFormatTime(cutoff))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := &CleanupResult{
+		TaskIDs: ids,
+		Count:   len(ids),
+		DryRun:  dryRun,
+	}
+
+	if dryRun || len(ids) == 0 {
+		return result, nil
+	}
+
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	query := fmt.Sprintf("DELETE FROM tasks WHERE id IN (%s)", placeholders(len(ids)))
+	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func insertDeps(ctx context.Context, tx *sql.Tx, childID string, deps []models.Dependency) error {

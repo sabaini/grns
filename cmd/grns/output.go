@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,6 +72,17 @@ func writeTaskDetail(task api.TaskResponse) error {
 
 	if len(task.Labels) > 0 {
 		lines = append(lines, fmt.Sprintf("labels: %s", strings.Join(task.Labels, ", ")))
+	}
+	if len(task.Custom) > 0 {
+		lines = append(lines, "custom:")
+		keys := make([]string, 0, len(task.Custom))
+		for k := range task.Custom {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			lines = append(lines, fmt.Sprintf("  %s: %v", k, task.Custom[k]))
+		}
 	}
 	if len(task.Deps) > 0 {
 		lines = append(lines, "deps:")
