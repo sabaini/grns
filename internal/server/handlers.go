@@ -19,62 +19,11 @@ const (
 	defaultPriority = 2
 )
 
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		s.handleCreateTask(w, r)
-	case http.MethodGet:
-		s.handleListTasks(w, r)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
-	id, sub := splitTaskPath(r.URL.Path)
-	if id == "" {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	if sub == "labels" {
-		s.handleTaskLabels(w, r, id)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		s.handleGetTask(w, r, id)
-	case http.MethodPatch:
-		s.handleUpdateTask(w, r, id)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleTaskLabels(w http.ResponseWriter, r *http.Request, id string) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleListTaskLabels(w, r, id)
-	case http.MethodPost:
-		s.handleAddTaskLabels(w, r, id)
-	case http.MethodDelete:
-		s.handleRemoveTaskLabels(w, r, id)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req api.TaskCloseRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -91,8 +40,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := time.Now().UTC()
-	if err := s.store.CloseTasks(r.Context(), req.IDs, now); err != nil {
+	if err := s.service.Close(r.Context(), req.IDs); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -101,11 +49,6 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req api.TaskReopenRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -122,8 +65,7 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := time.Now().UTC()
-	if err := s.store.ReopenTasks(r.Context(), req.IDs, now); err != nil {
+	if err := s.service.Reopen(r.Context(), req.IDs); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -132,11 +74,6 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	limit := queryInt(r, "limit")
 	responses, err := s.service.Ready(r.Context(), limit)
 	if err != nil {
@@ -148,11 +85,6 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	days := queryIntDefault(r, "days", 30)
 	limit := queryInt(r, "limit")
 	statuses := splitCSV(r.URL.Query().Get("status"))
@@ -181,11 +113,6 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req api.DepCreateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -213,11 +140,6 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	labels, err := s.store.ListAllLabels(r.Context())
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
@@ -244,11 +166,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	var reqs []api.TaskCreateRequest
 	if err := decodeJSON(r, &reqs); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -268,7 +185,13 @@ func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, responses)
 }
 
-func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
 	resp, err := s.service.Get(r.Context(), id)
 	if err != nil {
 		s.writeError(w, httpStatusFromError(err), err)
@@ -278,7 +201,13 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, id string
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
 	var req api.TaskUpdateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -415,7 +344,13 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, responses)
 }
 
-func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
 	labels, err := s.store.ListLabels(r.Context(), id)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
@@ -425,7 +360,13 @@ func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request, id
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
-func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
 	var req api.LabelsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -450,7 +391,13 @@ func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request, id 
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
-func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validateID(id) {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+		return
+	}
+
 	var req api.LabelsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -475,9 +422,11 @@ func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request, 
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
-
 func (s *Server) writeError(w http.ResponseWriter, status int, err error) {
 	code := errorCode(status, err)
+	if status >= 500 {
+		s.logger.Error("request error", "status", status, "code", code, "error", err)
+	}
 	s.writeJSON(w, status, api.ErrorResponse{Error: err.Error(), Code: code})
 }
 
@@ -542,22 +491,7 @@ func isUniqueConstraint(err error) bool {
 }
 
 func decodeJSON(r *http.Request, dst any) error {
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(dst)
-}
-
-func splitTaskPath(path string) (string, string) {
-	trimmed := strings.TrimPrefix(path, "/v1/tasks/")
-	trimmed = strings.Trim(trimmed, "/")
-	if trimmed == "" {
-		return "", ""
-	}
-	parts := strings.Split(trimmed, "/")
-	if len(parts) == 1 {
-		return parts[0], ""
-	}
-	return parts[0], parts[1]
+	return json.NewDecoder(r.Body).Decode(dst)
 }
 
 func splitCSV(value string) []string {
@@ -604,4 +538,3 @@ func valueOrEmpty(ptr *string) string {
 	}
 	return strings.TrimSpace(*ptr)
 }
-

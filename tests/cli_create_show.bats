@@ -27,7 +27,7 @@ load 'helpers.bash'
   status_value="$(printf '%s' "$output" | json_get status)"
   [ "$status_value" = "in_progress" ]
 
-  run "$GRNS_BIN" close "$id" --reason "Done" --json
+  run "$GRNS_BIN" close "$id"  --json
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" show "$id" --json
@@ -35,7 +35,7 @@ load 'helpers.bash'
   status_value="$(printf '%s' "$output" | json_get status)"
   [ "$status_value" = "closed" ]
 
-  run "$GRNS_BIN" reopen "$id" --reason "Reopening" --json
+  run "$GRNS_BIN" reopen "$id"  --json
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" show "$id" --json

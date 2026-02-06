@@ -30,7 +30,7 @@ func NewClient(baseURL string) *Client {
 
 // Ping checks whether the API server is reachable.
 func (c *Client) Ping(ctx context.Context) error {
-	return c.do(ctx, http.MethodGet, "/v1/labels", nil, nil, nil)
+	return c.do(ctx, http.MethodGet, "/health", nil, nil, nil)
 }
 
 func (c *Client) CreateTask(ctx context.Context, req TaskCreateRequest) (TaskResponse, error) {

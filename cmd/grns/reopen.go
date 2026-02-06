@@ -10,8 +10,6 @@ import (
 )
 
 func newReopenCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
-	var reason string
-
 	cmd := &cobra.Command{
 		Use:   "reopen <id> [<id>...]",
 		Short: "Reopen tasks",
@@ -23,7 +21,7 @@ func newReopenCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cfg, func(client *api.Client) error {
-				resp, err := client.ReopenTasks(cmd.Context(), api.TaskReopenRequest{IDs: args, Reason: reason})
+				resp, err := client.ReopenTasks(cmd.Context(), api.TaskReopenRequest{IDs: args})
 				if err != nil {
 					return err
 				}
@@ -35,6 +33,5 @@ func newReopenCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&reason, "reason", "", "reopen reason")
 	return cmd
 }

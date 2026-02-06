@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"grns/internal/api"
@@ -40,6 +41,7 @@ func ensureServer(cfg *config.Config) (func(), error) {
 		return nil, nil
 	}
 
+	slog.Debug("auto-spawning server", "api_url", cfg.APIURL, "db", cfg.DBPath)
 	cmd, err := startServerProcess(cfg)
 	if err != nil {
 		return nil, err
@@ -50,6 +52,7 @@ func ensureServer(cfg *config.Config) (func(), error) {
 		_ = cmd.Wait()
 		return nil, err
 	}
+	slog.Debug("server ready")
 
 	cleanup := func() {
 		_ = cmd.Process.Kill()
@@ -70,8 +73,17 @@ func startServerProcess(cfg *config.Config) (*exec.Cmd, error) {
 		"GRNS_DB="+cfg.DBPath,
 		"GRNS_API_URL="+cfg.APIURL,
 	)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+
+	logFile, err := serverLogFile()
+	if err != nil {
+		slog.Warn("could not create server log file", "error", err)
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+	} else {
+		slog.Debug("server log file", "path", logFile.Name())
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -103,4 +115,12 @@ func isConnRefused(err error) bool {
 		return true
 	}
 	return false
+}
+
+func serverLogFile() (*os.File, error) {
+	dir := filepath.Join(os.TempDir(), "grns")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(filepath.Join(dir, "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 }

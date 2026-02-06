@@ -58,7 +58,7 @@ load 'helpers.bash'
   [ "$status" -eq 0 ]
   closed_id="$(printf '%s' "$output" | json_get id)"
 
-  run "$GRNS_BIN" close "$closed_id" --reason "Done" --json
+  run "$GRNS_BIN" close "$closed_id"  --json
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" list --status open,closed --json

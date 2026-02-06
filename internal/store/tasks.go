@@ -55,8 +55,8 @@ func (s *Store) CreateTask(ctx context.Context, task *models.Task, labels []stri
 		nullIfEmpty(task.Description),
 		nullIfEmpty(task.SpecID),
 		nullIfEmpty(task.ParentID),
-		formatTime(task.CreatedAt),
-		formatTime(task.UpdatedAt),
+		dbFormatTime(task.CreatedAt),
+		dbFormatTime(task.UpdatedAt),
 		nullTime(task.ClosedAt),
 		nil,
 	)
@@ -126,7 +126,7 @@ func (s *Store) UpdateTask(ctx context.Context, id string, update TaskUpdate) er
 	}
 
 	set = append(set, "updated_at = ?")
-	args = append(args, formatTime(update.UpdatedAt))
+	args = append(args, dbFormatTime(update.UpdatedAt))
 
 	if len(set) == 0 {
 		return nil
@@ -211,7 +211,7 @@ func (s *Store) ListReadyTasks(ctx context.Context, limit int) ([]models.Task, e
 
 // ListStaleTasks returns tasks not updated since cutoff.
 func (s *Store) ListStaleTasks(ctx context.Context, cutoff time.Time, statuses []string, limit int) ([]models.Task, error) {
-	args := []any{formatTime(cutoff)}
+	args := []any{dbFormatTime(cutoff)}
 	where := []string{"updated_at < ?"}
 
 	if len(statuses) > 0 {
@@ -377,7 +377,7 @@ func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time
 		return nil
 	}
 
-	args := []any{formatTime(closedAt), formatTime(closedAt)}
+	args := []any{dbFormatTime(closedAt), dbFormatTime(closedAt)}
 	for _, id := range ids {
 		args = append(args, id)
 	}
@@ -392,7 +392,7 @@ func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.T
 		return nil
 	}
 
-	args := []any{formatTime(reopenedAt)}
+	args := []any{dbFormatTime(reopenedAt)}
 	for _, id := range ids {
 		args = append(args, id)
 	}
@@ -538,18 +538,18 @@ func scanTask(scanner interface{
 	task.SpecID = specID.String
 	task.ParentID = parentID.String
 
-	parsedCreated, err := parseTime(createdAt)
+	parsedCreated, err := dbParseTime(createdAt)
 	if err != nil {
 		return nil, err
 	}
-	parsedUpdated, err := parseTime(updatedAt)
+	parsedUpdated, err := dbParseTime(updatedAt)
 	if err != nil {
 		return nil, err
 	}
 	task.CreatedAt = parsedCreated
 	task.UpdatedAt = parsedUpdated
 	if closedAt.Valid {
-		parsedClosed, err := parseTime(closedAt.String)
+		parsedClosed, err := dbParseTime(closedAt.String)
 		if err != nil {
 			return nil, err
 		}
@@ -577,14 +577,14 @@ func nullTime(value *time.Time) any {
 	if value == nil || value.IsZero() {
 		return nil
 	}
-	return formatTime(*value)
+	return dbFormatTime(*value)
 }
 
-func formatTime(t time.Time) string {
+func dbFormatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func parseTime(value string) (time.Time, error) {
+func dbParseTime(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}

@@ -29,14 +29,12 @@ type TaskUpdateRequest struct {
 
 // TaskCloseRequest defines the payload for closing tasks.
 type TaskCloseRequest struct {
-	IDs    []string `json:"ids"`
-	Reason string   `json:"reason,omitempty"`
+	IDs []string `json:"ids"`
 }
 
 // TaskReopenRequest defines the payload for reopening tasks.
 type TaskReopenRequest struct {
-	IDs    []string `json:"ids"`
-	Reason string   `json:"reason,omitempty"`
+	IDs []string `json:"ids"`
 }
 
 // LabelsRequest defines label add/remove payloads.

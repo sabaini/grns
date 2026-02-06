@@ -48,7 +48,7 @@ func Open(path string) (*Store, error) {
 	if err := configureDB(db); err != nil {
 		return nil, err
 	}
-	if err := bootstrapSchema(db); err != nil {
+	if err := runMigrations(db); err != nil {
 		return nil, err
 	}
 

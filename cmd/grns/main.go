@@ -7,6 +7,9 @@ import (
 	"grns/internal/config"
 )
 
+// version is set at build time via -ldflags.
+var version = "dev"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {

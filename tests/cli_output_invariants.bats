@@ -10,7 +10,7 @@ load 'helpers.bash'
   has_closed_at="$(printf '%s' "$output" | json_has_key closed_at)"
   [ "$has_closed_at" = "false" ]
 
-  run "$GRNS_BIN" close "$id" --reason "Done" --json
+  run "$GRNS_BIN" close "$id"  --json
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" show "$id" --json

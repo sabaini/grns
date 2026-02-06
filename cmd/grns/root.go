@@ -14,7 +14,7 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 		Short: "Grns is a lightweight issue tracker and memory system for agents",
 	}
 
-	cmd.Version = "0.0.0"
+	cmd.Version = version
 	cmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output JSON")
 
 	cmd.AddCommand(
@@ -29,6 +29,7 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 		newReopenCmd(cfg, &jsonOutput),
 		newDepCmd(cfg, &jsonOutput),
 		newLabelCmd(cfg, &jsonOutput),
+		newMigrateCmd(cfg, &jsonOutput),
 	)
 
 	return cmd

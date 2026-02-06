@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -22,18 +24,23 @@ func newSrvCmd(cfg *config.Config) *cobra.Command {
 				return fmt.Errorf("db path is required")
 			}
 
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+				Level: slog.LevelInfo,
+			}))
+
 			addr, err := server.ListenAddr(cfg.APIURL)
 			if err != nil {
 				return err
 			}
 
+			logger.Info("opening database", "path", cfg.DBPath)
 			st, err := store.Open(cfg.DBPath)
 			if err != nil {
 				return err
 			}
 			defer st.Close()
 
-			srv := server.New(addr, st, cfg.ProjectPrefix)
+			srv := server.New(addr, st, cfg.ProjectPrefix, logger)
 			return srv.ListenAndServe()
 		},
 	}

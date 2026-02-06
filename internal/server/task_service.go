@@ -244,6 +244,18 @@ func (s *TaskService) Stale(ctx context.Context, cutoff time.Time, statuses []st
 	return s.attachLabels(ctx, tasks)
 }
 
+// Close closes tasks by ids.
+func (s *TaskService) Close(ctx context.Context, ids []string) error {
+	now := time.Now().UTC()
+	return s.store.CloseTasks(ctx, ids, now)
+}
+
+// Reopen reopens tasks by ids.
+func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
+	now := time.Now().UTC()
+	return s.store.ReopenTasks(ctx, ids, now)
+}
+
 func (s *TaskService) attachLabels(ctx context.Context, tasks []models.Task) ([]api.TaskResponse, error) {
 	ids := make([]string, 0, len(tasks))
 	for _, task := range tasks {

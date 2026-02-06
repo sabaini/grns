@@ -10,8 +10,6 @@ import (
 )
 
 func newCloseCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
-	var reason string
-
 	cmd := &cobra.Command{
 		Use:   "close <id> [<id>...]",
 		Short: "Close tasks",
@@ -23,7 +21,7 @@ func newCloseCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cfg, func(client *api.Client) error {
-				resp, err := client.CloseTasks(cmd.Context(), api.TaskCloseRequest{IDs: args, Reason: reason})
+				resp, err := client.CloseTasks(cmd.Context(), api.TaskCloseRequest{IDs: args})
 				if err != nil {
 					return err
 				}
@@ -35,6 +33,5 @@ func newCloseCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&reason, "reason", "", "close reason")
 	return cmd
 }
