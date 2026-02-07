@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 list:*)",
+      "Bash(uv:*)",
+      "Bash(pkill:*)",
+      "Bash(just build:*)",
+      "Bash(just test-py:*)",
+      "Bash(just test-py-hypothesis:*)"
+    ]
+  }
+}

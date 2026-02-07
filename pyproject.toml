@@ -1,0 +1,9 @@
+[project]
+name = "grns-tests"
+version = "0.0.0"
+description = "Python integration & property tests for grns"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+]
