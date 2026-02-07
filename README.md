@@ -32,7 +32,7 @@ grns reopen <id> --json
 
 Config files (TOML):
 - Global: `$HOME/.grns.toml`
-- Project: `.grns.toml` in current workspace
+- Project: `.grns.toml` in current workspace (**loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`**)
 
 Supported config keys:
 - `project_prefix` (default: `gr`)
@@ -44,6 +44,9 @@ Supported config keys:
 - `GRNS_API_URL`
 - `GRNS_DB`
 - `GRNS_HTTP_TIMEOUT` (client timeout, e.g. `30s` or `30`)
+- `GRNS_CONFIG_DIR` (override config file location; uses `$GRNS_CONFIG_DIR/.grns.toml`)
+- `GRNS_TRUST_PROJECT_CONFIG=true` (opt in to loading `./.grns.toml`; CLI prints a warning when this trusted project config is used)
+- `GRNS_DB_MAX_OPEN_CONNS`, `GRNS_DB_MAX_IDLE_CONNS`, `GRNS_DB_CONN_MAX_LIFETIME` (optional SQLite pool tuning)
 
 ### Security-related environment variables
 
@@ -94,6 +97,13 @@ grns srv
 Supported import modes:
 - `--dedupe skip|overwrite|error`
 - `--orphan-handling allow|skip|strict`
+- `--atomic` (apply each import request/chunk transactionally)
+
+Import failure semantics:
+- Default import mode is **structured best-effort** with counters/messages.
+- `--atomic` enables transactional apply per request (or per stream chunk).
+- Import responses include `apply_mode` and `applied_chunks` checkpoint metadata.
+- With `--orphan-handling strict`, orphan deps are counted as errors and affected dependency updates are skipped (task upserts may still apply).
 
 ## Build and test
 

@@ -16,6 +16,11 @@ coverage.out
 # Python test caches
 __pycache__/
 .pytest_cache/
+.hypothesis/
+
+# uv
+.venv/
+uv.lock
 
 # Editor/OS files
 .vscode/

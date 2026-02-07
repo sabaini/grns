@@ -2,9 +2,12 @@ import os
 import socket
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+
+from tests_py.helpers import run_grns, seed_db
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -76,4 +79,56 @@ def running_server(grns_env: dict[str, str], grns_bin: str):
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+@pytest.fixture
+def seeded_server(running_server):
+    """Running server with seed data pre-loaded via 'create' commands."""
+    seed_db(running_server)
+    return running_server
+
+
+@contextmanager
+def _make_server(grns_bin: str, tmp_path: Path, suffix: str = "target"):
+    """Start a second grns server with a fresh DB."""
+    port = _free_port()
+    env = os.environ.copy()
+    env.update(
+        {
+            "GRNS_BIN": grns_bin,
+            "GRNS_API_URL": f"http://127.0.0.1:{port}",
+            "GRNS_DB": str(tmp_path / f"{suffix}.db"),
+            "GRNS_REPO_ROOT": str(REPO_ROOT),
+        }
+    )
+    proc = subprocess.Popen(
+        [grns_bin, "srv"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_for_health(env["GRNS_API_URL"], timeout_seconds=8.0)
+        yield env
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+@pytest.fixture
+def make_server(grns_bin: str, tmp_path: Path):
+    """Factory fixture: returns a context manager that starts a fresh server."""
+    servers = []
+
+    @contextmanager
+    def _factory(suffix: str = "target"):
+        with _make_server(grns_bin, tmp_path, suffix) as env:
+            servers.append(env)
+            yield env
+
+    return _factory
 

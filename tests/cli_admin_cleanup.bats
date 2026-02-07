@@ -18,6 +18,9 @@ load 'helpers.bash'
   count="$(printf '%s' "$output" | json_get count)"
   [ "$count" = "0" ]
 
+  task_ids_len="$(printf '%s' "$output" | json_field_len task_ids)"
+  [ "$task_ids_len" = "0" ]
+
   # Task should still exist.
   run "$GRNS_BIN" show "$id" --json
   [ "$status" -eq 0 ]
@@ -39,12 +42,36 @@ load 'helpers.bash'
   run "$GRNS_BIN" close "$id" --json
   [ "$status" -eq 0 ]
 
-  # Force cleanup with older-than 1 (recently closed, won't match).
+  # Re-import task as closed with old updated_at so it matches cleanup cutoff.
+  infile="$BATS_TEST_TMPDIR/cleanup_old_closed.jsonl"
+  cat > "$infile" <<EOF
+{"id":"$id","title":"Delete me","status":"closed","type":"task","priority":2,"created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z"}
+EOF
+
+  run "$GRNS_BIN" import -i "$infile" --dedupe overwrite --json
+  [ "$status" -eq 0 ]
+
   run "$GRNS_BIN" admin cleanup --older-than 1 --force --json
   [ "$status" -eq 0 ]
 
   dry="$(printf '%s' "$output" | json_get dry_run)"
   [ "$dry" = "False" ]
+
+  count="$(printf '%s' "$output" | json_get count)"
+  [ "$count" = "1" ]
+
+  OUTPUT="$output" python3 - "$id" <<'PY'
+import json
+import os
+import sys
+
+data = json.loads(os.environ["OUTPUT"])
+expected = sys.argv[1]
+assert expected in data.get("task_ids", [])
+PY
+
+  run "$GRNS_BIN" show "$id" --json
+  [ "$status" -ne 0 ]
 }
 
 @test "admin cleanup requires older-than flag" {

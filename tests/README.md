@@ -13,10 +13,27 @@ bats tests
 
 # Performance/stress suite
 bats tests/perf
+
+# Integration/concurrency pytest suite (optional)
+python3 -m pytest -q tests_py
+
+# Pytest performance benchmarks (optional, skipped unless enabled)
+GRNS_PYTEST_PERF=1 python3 -m pytest -q -m perf tests_py
 ```
 
 ### Performance Suite Configuration
-Use `GRNS_PERF_COUNT` to control the number of tasks created in perf tests (default: 200).
+BATS perf test knob:
+- `GRNS_PERF_COUNT` (default: 200)
+
+Pytest perf knobs:
+- `GRNS_PYTEST_PERF=1` (required to run perf tests)
+- `GRNS_PERF_COUNT_BATCH` (default: 300)
+- `GRNS_PERF_COUNT_IMPORT` (default: 600)
+- `GRNS_PERF_COUNT_LIST` (default: 1000)
+- `GRNS_PERF_LIST_ROUNDS` (default: 20)
+- `GRNS_PERF_MAX_BATCH_CREATE_SEC` (default: 8.0)
+- `GRNS_PERF_MAX_IMPORT_STREAM_SEC` (default: 8.0)
+- `GRNS_PERF_MAX_LIST_P95_MS` (default: 250.0)
 
 ## Test Database
 Tests set `GRNS_DB` to a temporary SQLite file under `$BATS_TEST_TMPDIR`.
@@ -26,3 +43,8 @@ Tests set `GRNS_DB` to a temporary SQLite file under `$BATS_TEST_TMPDIR`.
 ## Seed Data
 Seed data lives in `tests/data/*.jsonl`.
 Each JSONL entry is translated into a `grns create` call by the test helper.
+
+## Test Layer Ownership
+- **Go unit tests** (`internal/**/_test.go`): service/store logic and edge semantics.
+- **BATS** (`tests/*.bats`): CLI surface and user-facing behavior checks.
+- **pytest** (`tests_py/`): orchestration, concurrency, and failure-mode integration checks.

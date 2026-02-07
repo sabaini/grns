@@ -10,6 +10,9 @@ setup_test_env() {
   export GRNS_BIN="${GRNS_BIN:-$(pwd)/bin/grns}"
   export GRNS_DB="${GRNS_DB:-$BATS_TEST_TMPDIR/grns.db}"
   export GRNS_TEST_DATA_DIR="${GRNS_TEST_DATA_DIR:-$(pwd)/tests/data}"
+  if [ -z "${GRNS_API_URL:-}" ]; then
+    export GRNS_API_URL="http://127.0.0.1:$(get_free_port)"
+  fi
   mkdir -p "$BATS_TEST_TMPDIR"
 }
 
@@ -82,6 +85,31 @@ with open(path, "r", encoding="utf-8") as fh:
         if data.get("description"):
             args += ["-d", data["description"]]
         subprocess.check_call(args, env=env)
+PY
+}
+
+wait_for_http_server() {
+  local url="$1"
+  local timeout_seconds="${2:-5}"
+  python3 - "$url" "$timeout_seconds" <<'PY'
+import sys
+import time
+import urllib.request
+
+url = sys.argv[1]
+timeout_seconds = float(sys.argv[2])
+deadline = time.time() + timeout_seconds
+last_error = None
+
+while time.time() < deadline:
+    try:
+        with urllib.request.urlopen(url, timeout=0.2):
+            sys.exit(0)
+    except Exception as exc:
+        last_error = exc
+        time.sleep(0.05)
+
+raise SystemExit(f"server at {url} did not become ready: {last_error}")
 PY
 }
 

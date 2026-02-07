@@ -18,7 +18,7 @@ load 'helpers.bash'
   export GRNS_TEST_HTTP_PID
   export GRNS_API_URL="http://127.0.0.1:${port}"
 
-  sleep 0.2
+  wait_for_http_server "http://127.0.0.1:${port}" 5
 
   run "$GRNS_BIN" create "Bad api" -t task -p 1 --json
   [ "$status" -ne 0 ]

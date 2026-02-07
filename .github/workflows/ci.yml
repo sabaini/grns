@@ -22,6 +22,9 @@ jobs:
       - name: Build
         run: just build
 
+      - name: Formatting check
+        run: just fmt-check
+
       - name: Unit tests
         run: just test
 
@@ -58,6 +61,23 @@ jobs:
 
       - name: Integration tests
         run: just test-integration
+
+      - name: Install pytest (optional stage)
+        run: sudo apt-get install -y python3-pytest
+
+      - name: Pytest integration/concurrency tests (optional)
+        continue-on-error: true
+        run: pytest -q tests_py
+
+      - name: Pytest perf benchmarks (optional)
+        continue-on-error: true
+        env:
+          GRNS_PYTEST_PERF: "1"
+          GRNS_PERF_COUNT_BATCH: "200"
+          GRNS_PERF_COUNT_IMPORT: "400"
+          GRNS_PERF_COUNT_LIST: "800"
+          GRNS_PERF_LIST_ROUNDS: "12"
+        run: pytest -q -m perf tests_py
 
   lint:
     runs-on: ubuntu-latest
