@@ -19,7 +19,7 @@ type importStreamOptions struct {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.exportLimiter, w, "export") {
+	if !s.acquireLimiter(s.exportLimiter, w, r, "export") {
 		return
 	}
 	defer s.releaseLimiter(s.exportLimiter)
@@ -58,11 +58,11 @@ func (s *Server) logExportError(r *http.Request, stage string, offset int, taskI
 	if taskID != "" {
 		fields = append(fields, "task_id", taskID)
 	}
-	s.logger.Error("export failed", fields...)
+	s.log().Error("export failed", fields...)
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.importLimiter, w, "import") {
+	if !s.acquireLimiter(s.importLimiter, w, r, "import") {
 		return
 	}
 	defer s.releaseLimiter(s.importLimiter)
@@ -82,17 +82,20 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("import request", "task_count", len(req.Tasks), "dry_run", req.DryRun, "dedupe", req.Dedupe, "orphan_handling", req.OrphanHandling, "atomic", req.Atomic)
+
 	resp, err := s.service.Import(r.Context(), req)
 	if err != nil {
 		s.writeServiceError(w, r, err)
 		return
 	}
 
+	s.log().Debug("import complete", "created", resp.Created, "updated", resp.Updated, "skipped", resp.Skipped, "errors", resp.Errors, "apply_mode", resp.ApplyMode, "applied_chunks", resp.AppliedChunks)
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.importLimiter, w, "import") {
+	if !s.acquireLimiter(s.importLimiter, w, r, "import") {
 		return
 	}
 	defer s.releaseLimiter(s.importLimiter)
@@ -103,6 +106,8 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("import stream request", "dry_run", opts.dryRun, "dedupe", opts.dedupe, "orphan_handling", opts.orphanHandling, "atomic", opts.atomic)
+
 	r.Body = http.MaxBytesReader(w, r.Body, int64(importJSONMaxBody))
 	scanner := bufio.NewScanner(r.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), importStreamMaxLine)
@@ -110,12 +115,16 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 	response := api.ImportResponse{DryRun: opts.dryRun, TaskIDs: []string{}}
 	chunk := make([]api.TaskImportRecord, 0, importStreamChunkSize)
 	lineNum := 0
+	chunkIndex := 0
 	hasRecords := false
 
 	flushChunk := func() error {
 		if len(chunk) == 0 {
 			return nil
 		}
+		chunkIndex++
+		chunkSize := len(chunk)
+		s.log().Debug("import stream chunk", "chunk", chunkIndex, "size", chunkSize)
 		resp, err := s.service.Import(r.Context(), api.ImportRequest{
 			Tasks:          chunk,
 			DryRun:         opts.dryRun,
@@ -136,6 +145,7 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 		if response.ApplyMode == "" {
 			response.ApplyMode = resp.ApplyMode
 		}
+		s.log().Debug("import stream chunk complete", "chunk", chunkIndex, "size", chunkSize, "created", resp.Created, "updated", resp.Updated, "skipped", resp.Skipped, "errors", resp.Errors)
 		chunk = chunk[:0]
 		return nil
 	}
@@ -175,6 +185,7 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("import stream complete", "created", response.Created, "updated", response.Updated, "skipped", response.Skipped, "errors", response.Errors, "chunks", chunkIndex, "apply_mode", response.ApplyMode)
 	s.writeJSON(w, http.StatusOK, response)
 }
 

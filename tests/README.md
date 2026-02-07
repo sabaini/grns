@@ -73,6 +73,14 @@ Tests set `GRNS_DB` to a temporary SQLite file under `$BATS_TEST_TMPDIR`.
 Seed data lives in `tests/data/*.jsonl`.
 Each JSONL entry is translated into a `grns create` call by the test helper.
 
+## HTTP/API test helpers
+For tests that directly hit HTTP endpoints, use `tests/helpers_http.bash`:
+- `start_grns_server` starts a real grns server and waits for `/health`
+- `wait_for_file` waits for synchronization markers in concurrency tests
+- `hold_import_limiter_slot` holds one `/v1/import/stream` slot to exercise `429 resource_exhausted`
+
+This keeps API-focused BATS tests consistent and reduces duplicate server bootstrap logic.
+
 ## Test Layer Ownership
 - **Go unit tests** (`internal/**/_test.go`): service/store logic and edge semantics.
 - **BATS** (`tests/*.bats`): CLI surface and user-facing behavior checks.

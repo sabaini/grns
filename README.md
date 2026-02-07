@@ -44,6 +44,7 @@ Supported config keys:
 - `GRNS_API_URL`
 - `GRNS_DB`
 - `GRNS_HTTP_TIMEOUT` (client timeout, e.g. `30s` or `30`)
+- `GRNS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; defaults to `info`)
 - `GRNS_CONFIG_DIR` (override config file location; uses `$GRNS_CONFIG_DIR/.grns.toml`)
 - `GRNS_TRUST_PROJECT_CONFIG=true` (opt in to loading `./.grns.toml`; CLI prints a warning when this trusted project config is used)
 - `GRNS_DB_MAX_OPEN_CONNS`, `GRNS_DB_MAX_IDLE_CONNS`, `GRNS_DB_CONN_MAX_LIFETIME` (optional SQLite pool tuning)
@@ -140,6 +141,10 @@ just bench-go-perf         # go benchmark snapshot
 just test-coverage-critical # critical file coverage guard
 just lint
 ```
+
+Global flags:
+- `--json`
+- `--log-level debug|info|warn|error` (overrides `GRNS_LOG_LEVEL`)
 
 Run command help for full flags:
 

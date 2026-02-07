@@ -61,7 +61,7 @@ func New(addr string, store store.TaskStore, projectPrefix string, logger *slog.
 
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
-	s.logger.Info("starting server", "addr", s.addr)
+	s.log().Info("starting server", "addr", s.addr)
 	server := &http.Server{
 		Addr:              s.addr,
 		Handler:           s.routes(),
@@ -109,7 +109,7 @@ func isAllowedListenHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, name string) bool {
+func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, r *http.Request, name string) bool {
 	if limiter == nil {
 		return true
 	}
@@ -117,14 +117,22 @@ func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, na
 	case limiter <- struct{}{}:
 		return true
 	default:
-		s.writeError(w, http.StatusTooManyRequests, apiError{
+		err := apiError{
 			status:  http.StatusTooManyRequests,
 			code:    "resource_exhausted",
 			errCode: ErrCodeResourceExhausted,
 			err:     fmt.Errorf("too many concurrent %s requests", name),
-		})
+		}
+		s.writeErrorReq(w, r, http.StatusTooManyRequests, err)
 		return false
 	}
+}
+
+func (s *Server) log() *slog.Logger {
+	if s != nil && s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 func (s *Server) releaseLimiter(limiter chan struct{}) {

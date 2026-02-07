@@ -35,6 +35,7 @@ Kill stale servers before integration tests: `pkill -f "grns srv"`.
 - **Naming**: `dbFormatTime`/`dbParseTime` for store-internal time serialization (RFC3339Nano). CLI `formatTime` uses RFC3339.
 - **Validation**: IDs match `^[a-z]{2}-[0-9a-z]{4}$`. Statuses, types, labels normalized to lowercase.
 - **No CGO**. The sqlite driver is pure Go.
+- **commits**: use conventional commits. use prefixes feat: and fix: and if applicable build:, chore:, ci:, docs:, style:, refactor:, perf:, test: as well
 
 ## Key Rules
 

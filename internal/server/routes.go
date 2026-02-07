@@ -51,7 +51,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/deps", s.handleDeps)
 	mux.HandleFunc("GET /v1/labels", s.handleLabels)
 
-	return s.withAuth(mux)
+	return s.withRequestLogging(s.withAuth(mux))
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
@@ -73,7 +73,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			auth := strings.TrimSpace(r.Header.Get("Authorization"))
 			expected := "Bearer " + s.apiToken
 			if auth != expected {
-				s.writeError(w, http.StatusUnauthorized, apiError{
+				s.writeErrorReq(w, r, http.StatusUnauthorized, apiError{
 					status:  http.StatusUnauthorized,
 					code:    "unauthorized",
 					errCode: ErrCodeUnauthorized,
@@ -86,7 +86,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		if s.adminToken != "" && strings.HasPrefix(r.URL.Path, "/v1/admin/") {
 			adminToken := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
 			if adminToken != s.adminToken {
-				s.writeError(w, http.StatusForbidden, apiError{
+				s.writeErrorReq(w, r, http.StatusForbidden, apiError{
 					status:  http.StatusForbidden,
 					code:    "forbidden",
 					errCode: ErrCodeForbidden,

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -24,9 +23,7 @@ func newSrvCmd(cfg *config.Config) *cobra.Command {
 				return fmt.Errorf("db path is required")
 			}
 
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
-			}))
+			logger := slog.Default().With("component", "server")
 
 			addr, err := server.ListenAddr(cfg.APIURL)
 			if err != nil {

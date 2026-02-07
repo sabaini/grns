@@ -59,6 +59,7 @@ func TestReadmeRuntimeEnvironmentKeysDocumented(t *testing.T) {
 		"GRNS_API_URL",
 		"GRNS_DB",
 		"GRNS_HTTP_TIMEOUT",
+		"GRNS_LOG_LEVEL",
 		"GRNS_CONFIG_DIR",
 		"GRNS_TRUST_PROJECT_CONFIG",
 		"GRNS_DB_MAX_OPEN_CONNS",

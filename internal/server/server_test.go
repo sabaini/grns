@@ -41,6 +41,33 @@ func TestListenAddrRemoteGuard(t *testing.T) {
 	})
 }
 
+func TestAcquireLimiterReturnsStructured429(t *testing.T) {
+	srv := &Server{}
+	limiter := make(chan struct{}, 1)
+	limiter <- struct{}{}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+	w := httptest.NewRecorder()
+	ok := srv.acquireLimiter(limiter, w, req, "search")
+	if ok {
+		t.Fatal("expected limiter acquisition to fail")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	var errResp api.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Code != "resource_exhausted" {
+		t.Fatalf("expected code resource_exhausted, got %q", errResp.Code)
+	}
+	if errResp.ErrorCode != ErrCodeResourceExhausted {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeResourceExhausted, errResp.ErrorCode)
+	}
+}
+
 func TestWithAuth(t *testing.T) {
 	t.Run("denies missing auth", func(t *testing.T) {
 		srv := &Server{apiToken: "token"}

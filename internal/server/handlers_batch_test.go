@@ -33,6 +33,13 @@ func TestHandleBatchCreateAllOrNothing(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d (%s)", w.Code, w.Body.String())
 	}
+	var errResp api.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.ErrorCode != ErrCodeTaskIDExists {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeTaskIDExists, errResp.ErrorCode)
+	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
 	listW := httptest.NewRecorder()

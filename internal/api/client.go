@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -311,23 +312,33 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		resp, err := c.http.Do(req)
 		if err != nil {
 			if attempt+1 < maxAttempts && shouldRetryTransport(err) {
-				time.Sleep(retryDelay(attempt))
+				delay := retryDelay(attempt)
+				slog.Debug("api request retrying after transport error", "method", method, "path", path, "attempt", attempt+1, "max_attempts", maxAttempts, "delay_ms", delay.Milliseconds(), "error", err)
+				time.Sleep(delay)
 				continue
 			}
+			slog.Debug("api request transport failure", "method", method, "path", path, "attempt", attempt+1, "max_attempts", maxAttempts, "error", err)
 			return err
 		}
 
 		if resp.StatusCode >= 500 && attempt+1 < maxAttempts && isRetryableStatus(resp.StatusCode) {
+			delay := retryDelay(attempt)
+			slog.Debug("api request retrying after server error", "method", method, "path", path, "attempt", attempt+1, "max_attempts", maxAttempts, "status", resp.StatusCode, "delay_ms", delay.Milliseconds())
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
-			time.Sleep(retryDelay(attempt))
+			time.Sleep(delay)
 			continue
 		}
 
 		if resp.StatusCode >= 400 {
+			slog.Debug("api request failed", "method", method, "path", path, "attempt", attempt+1, "status", resp.StatusCode)
 			err := decodeError(resp)
 			resp.Body.Close()
 			return err
+		}
+
+		if attempt > 0 {
+			slog.Debug("api request succeeded after retry", "method", method, "path", path, "attempt", attempt+1, "status", resp.StatusCode)
 		}
 
 		if out == nil {

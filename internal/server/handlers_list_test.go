@@ -52,6 +52,7 @@ func TestHandleListTasksInvalidQueryParams(t *testing.T) {
 		{name: "priority out of range", query: "priority=5", wantMessage: "priority must be between 0 and 4", wantCode: ErrCodeInvalidPriority},
 		{name: "priority min parse", query: "priority_min=bad", wantMessage: "invalid priority_min", wantCode: ErrCodeInvalidPriority},
 		{name: "priority range inverted", query: "priority_min=4&priority_max=1", wantMessage: "priority_min cannot be greater than priority_max", wantCode: ErrCodeInvalidPriority},
+		{name: "invalid created_after", query: "created_after=nope", wantMessage: "invalid created_after", wantCode: ErrCodeInvalidTimeFilter},
 	}
 
 	for _, tt := range tests {

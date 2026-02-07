@@ -32,24 +32,32 @@ func (s *Server) writeErrorReq(w http.ResponseWriter, r *http.Request, status in
 	}
 
 	code := errorCode(status, err)
-	errorCode := errorNumericCode(status, err)
+	numericCode := errorNumericCode(status, err)
 	message := err.Error()
-	if status >= 500 {
-		fields := []any{"status", status, "code", code, "error_code", errorCode, "error", err}
-		if r != nil {
-			fields = append(fields, "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
-		}
-		s.logger.Error("request error", fields...)
-		message = "internal error"
+
+	fields := []any{"status", status, "code", code, "error_code", numericCode, "error", err}
+	if r != nil {
+		fields = append(fields, "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 	}
-	s.writeJSON(w, status, api.ErrorResponse{Error: message, Code: code, ErrorCode: errorCode})
+
+	switch {
+	case status >= 500:
+		s.log().Error("request error", fields...)
+		message = "internal error"
+	case status >= 400 && shouldWarnClientError(status):
+		s.log().Warn("request rejected", fields...)
+	case status >= 400:
+		s.log().Debug("request rejected", fields...)
+	}
+
+	s.writeJSON(w, status, api.ErrorResponse{Error: message, Code: code, ErrorCode: numericCode})
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		s.logger.Error("write json response", "status", status, "error", err)
+		s.log().Error("write json response", "status", status, "error", err)
 	}
 }
 
@@ -159,6 +167,15 @@ func errorNumericCode(status int, err error) int {
 	return defaultErrorCodeByStatus(status)
 }
 
+func shouldWarnClientError(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
+}
+
 func isUniqueConstraint(err error) bool {
 	if err == nil {
 		return false
@@ -232,8 +249,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 	s.writeErrorReq(w, r, http.StatusInternalServerError, storeFailure(err))
 }
 
-func (s *Server) withLimiter(w http.ResponseWriter, limiter chan struct{}, name string, fn func()) {
-	if !s.acquireLimiter(limiter, w, name) {
+func (s *Server) withLimiter(w http.ResponseWriter, r *http.Request, limiter chan struct{}, name string, fn func()) {
+	if !s.acquireLimiter(limiter, w, r, name) {
 		return
 	}
 	defer s.releaseLimiter(limiter)

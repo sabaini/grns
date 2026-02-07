@@ -176,7 +176,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	heavySearch := filter.SearchQuery != "" || filter.SpecRegex != ""
 	if heavySearch {
-		if !s.acquireLimiter(s.searchLimiter, w, "search") {
+		if !s.acquireLimiter(s.searchLimiter, w, r, "search") {
 			return
 		}
 		defer s.releaseLimiter(s.searchLimiter)
