@@ -7,7 +7,23 @@ on:
     branches: [main, master]
 
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Guard go.mod/go.sum cleanliness
+        run: go mod tidy -diff
+
+      - name: Contract checks (README config keys and CLI command surface)
+        run: go test ./cmd/grns -run '^TestReadme' -count=1
+
   smoke:
+    needs: contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +69,9 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
+      - name: Critical file coverage guard
+        run: just test-coverage-critical
+
       - name: Build
         run: just build
 
@@ -62,10 +81,13 @@ jobs:
       - name: Integration tests
         run: just test-integration
 
-      - name: Install pytest (optional stage)
+      - name: Install pytest
         run: sudo apt-get install -y python3-pytest
 
-      - name: Pytest integration/concurrency tests (optional)
+      - name: Pytest concurrency/stress tests (required)
+        run: pytest -q tests_py/test_concurrency.py tests_py/test_concurrency_stress.py
+
+      - name: Pytest full suite (optional)
         continue-on-error: true
         run: pytest -q tests_py
 
@@ -78,6 +100,43 @@ jobs:
           GRNS_PERF_COUNT_LIST: "800"
           GRNS_PERF_LIST_ROUNDS: "12"
         run: pytest -q -m perf tests_py
+
+      - name: Pytest mixed-workload stress (optional)
+        continue-on-error: true
+        env:
+          GRNS_STRESS: "1"
+          GRNS_STRESS_WORKERS: "12"
+          GRNS_STRESS_DURATION_SEC: "8"
+          GRNS_STRESS_INITIAL_TASKS: "20"
+          GRNS_STRESS_SUMMARY_PATH: "/tmp/grns-stress-summary.json"
+        run: pytest -q -s -m stress tests_py/test_stress_mixed_workload.py
+
+      - name: Upload stress summary artifact (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-stress-summary
+          path: /tmp/grns-stress-summary.json
+          if-no-files-found: ignore
+
+  perf-go:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Go perf budget checks
+        env:
+          GRNS_PERF_ENFORCE: "1"
+          GRNS_PERF_GO_IMPORT_MAX_PER_OP: "220ms"
+        run: go test ./internal/server -run '^TestPerformanceBudgets$' -count=1 -v
+
+      - name: Go benchmark snapshot
+        run: go test ./internal/server -run '^$' -bench 'BenchmarkTaskService' -benchmem -count=1 -benchtime=1x
 
   lint:
     runs-on: ubuntu-latest

@@ -45,12 +45,13 @@ func TestHandleListTasksInvalidQueryParams(t *testing.T) {
 		name        string
 		query       string
 		wantMessage string
+		wantCode    int
 	}{
-		{name: "invalid limit", query: "limit=abc", wantMessage: "invalid limit"},
-		{name: "negative offset", query: "offset=-1", wantMessage: "offset must be >= 0"},
-		{name: "priority out of range", query: "priority=5", wantMessage: "priority must be between 0 and 4"},
-		{name: "priority min parse", query: "priority_min=bad", wantMessage: "invalid priority_min"},
-		{name: "priority range inverted", query: "priority_min=4&priority_max=1", wantMessage: "priority_min cannot be greater than priority_max"},
+		{name: "invalid limit", query: "limit=abc", wantMessage: "invalid limit", wantCode: ErrCodeInvalidQuery},
+		{name: "negative offset", query: "offset=-1", wantMessage: "offset must be >= 0", wantCode: ErrCodeInvalidQuery},
+		{name: "priority out of range", query: "priority=5", wantMessage: "priority must be between 0 and 4", wantCode: ErrCodeInvalidPriority},
+		{name: "priority min parse", query: "priority_min=bad", wantMessage: "invalid priority_min", wantCode: ErrCodeInvalidPriority},
+		{name: "priority range inverted", query: "priority_min=4&priority_max=1", wantMessage: "priority_min cannot be greater than priority_max", wantCode: ErrCodeInvalidPriority},
 	}
 
 	for _, tt := range tests {
@@ -69,6 +70,9 @@ func TestHandleListTasksInvalidQueryParams(t *testing.T) {
 			}
 			if !strings.Contains(errResp.Error, tt.wantMessage) {
 				t.Fatalf("expected error containing %q, got %q", tt.wantMessage, errResp.Error)
+			}
+			if errResp.ErrorCode != tt.wantCode {
+				t.Fatalf("expected error_code %d, got %d", tt.wantCode, errResp.ErrorCode)
 			}
 		})
 	}
@@ -92,6 +96,9 @@ func TestHandleListTasksMalformedSearch(t *testing.T) {
 	}
 	if errResp.Error != "invalid search query" {
 		t.Fatalf("expected invalid search query error, got %q", errResp.Error)
+	}
+	if errResp.ErrorCode != ErrCodeInvalidSearchQuery {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidSearchQuery, errResp.ErrorCode)
 	}
 }
 

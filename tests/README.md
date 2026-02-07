@@ -19,6 +19,9 @@ python3 -m pytest -q tests_py
 
 # Pytest performance benchmarks (optional, skipped unless enabled)
 GRNS_PYTEST_PERF=1 python3 -m pytest -q -m perf tests_py
+
+# Mixed-workload stress test (optional, skipped unless enabled)
+GRNS_STRESS=1 python3 -m pytest -q -s -m stress tests_py/test_stress_mixed_workload.py
 ```
 
 ### Performance Suite Configuration
@@ -35,6 +38,32 @@ Pytest perf knobs:
 - `GRNS_PERF_MAX_IMPORT_STREAM_SEC` (default: 8.0)
 - `GRNS_PERF_MAX_LIST_P95_MS` (default: 250.0)
 
+Pytest mixed stress knobs:
+- `GRNS_STRESS=1` (required to run stress test)
+- `GRNS_STRESS_WORKERS` (default: 16)
+- `GRNS_STRESS_DURATION_SEC` (default: 20)
+- `GRNS_STRESS_INITIAL_TASKS` (default: 30)
+- `GRNS_STRESS_SEED` (default: 1337)
+- `GRNS_STRESS_MAX_ERROR_RATE` (default: 0.0)
+- `GRNS_STRESS_MAX_P95_MS` (default: disabled)
+- `GRNS_STRESS_SUMMARY_PATH` (optional: write JSON summary artifact to this path)
+
+The stress test emits a single-line `STRESS_SUMMARY ...` JSON log at the end of each run.
+
+Compare two stress summaries:
+```bash
+python3 tests/ci/compare_stress_summaries.py /path/baseline.json /path/candidate.json
+
+# with regression gates (optional)
+python3 tests/ci/compare_stress_summaries.py baseline.json candidate.json \
+  --fail-on-ops-drop-pct 10 \
+  --fail-on-p95-regression-pct 25 \
+  --fail-on-error-rate-increase 0.001
+
+# same via just
+just compare-stress baseline.json candidate.json
+```
+
 ## Test Database
 Tests set `GRNS_DB` to a temporary SQLite file under `$BATS_TEST_TMPDIR`.
 
@@ -48,3 +77,22 @@ Each JSONL entry is translated into a `grns create` call by the test helper.
 - **Go unit tests** (`internal/**/_test.go`): service/store logic and edge semantics.
 - **BATS** (`tests/*.bats`): CLI surface and user-facing behavior checks.
 - **pytest** (`tests_py/`): orchestration, concurrency, and failure-mode integration checks.
+
+## Ordering Assertion Policy
+- Prefer **order-insensitive assertions** unless output ordering is part of the contract.
+- For JSON arrays in BATS, use sorted extraction helpers (e.g. `json_array_field_sorted`) before comparing expected values.
+- Only assert positional order when a command/API explicitly guarantees ordering (e.g., sort key documented).
+
+## Critical File Coverage Guard
+A critical-file coverage check runs in CI and can be run locally:
+
+```bash
+just test-coverage-critical
+```
+
+Default guarded files:
+- `internal/server/importer.go`
+- `internal/server/list_query.go`
+- `internal/server/task_mapper.go`
+- `internal/server/task_service.go`
+- `internal/store/tasks.go`

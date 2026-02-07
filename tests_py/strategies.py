@@ -123,3 +123,23 @@ def case_varied_statuses() -> st.SearchStrategy[str]:
 def case_varied_types() -> st.SearchStrategy[str]:
     """Valid types with truly random per-character casing."""
     return valid_types().flatmap(lambda t: _random_case(t))
+
+
+# ---------------------------------------------------------------------------
+# Composite strategies
+# ---------------------------------------------------------------------------
+
+
+def custom_field_maps(min_size: int = 1, max_size: int = 5) -> st.SearchStrategy[dict]:
+    """Random JSON-compatible key-value maps for custom fields."""
+    keys = st.text(
+        alphabet=string.ascii_lowercase + string.digits + "_",
+        min_size=1,
+        max_size=15,
+    )
+    values = st.one_of(
+        st.text(max_size=50),
+        st.integers(min_value=-10000, max_value=10000),
+        st.booleans(),
+    )
+    return st.dictionaries(keys, values, min_size=min_size, max_size=max_size)

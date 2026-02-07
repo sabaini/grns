@@ -5,6 +5,7 @@ Grns is a lightweight issue tracker and memory system for agents, focused on dur
 
 Related design docs:
 - [Attachments Design](attachments.md)
+- [Messaging Design](messaging.md)
 
 ## Problem Statement
 We need a fast, CLI-oriented task tracker that supports dependency modeling and recency queries while remaining simple enough for local use, yet extensible enough for multi-user collaboration.
@@ -112,8 +113,9 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 ## MVP REST API Surface (v1)
 - Base path: `/v1` (JSON only, no auth in MVP).
 - `POST /tasks` – create a task (supports optional `id`, `parent`, `deps`, `labels`, `custom`).
-- `POST /tasks/batch` – batch create (used by `create -f` for markdown imports).
+- `POST /tasks/batch` – batch create (used by `create -f` for markdown imports), applied transactionally (all-or-nothing).
 - `GET /tasks/{id}` – show task.
+- `POST /tasks/get` – bulk show by IDs (returns full task payloads, used by multi-id `show`).
 - `PATCH /tasks/{id}` – update fields (partial).
 - `POST /tasks/close` – close one or more tasks (`ids[]`, `reason`).
 - `POST /tasks/reopen` – reopen tasks (`ids[]`, `reason`).

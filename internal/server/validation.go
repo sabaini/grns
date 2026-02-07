@@ -6,27 +6,12 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"grns/internal/models"
 )
 
 var (
 	idRegex = regexp.MustCompile(`^[a-z]{2}-[0-9a-z]{4}$`)
-
-	allowedStatuses = map[string]struct{}{
-		"open":       {},
-		"in_progress": {},
-		"blocked":    {},
-		"deferred":   {},
-		"closed":     {},
-		"tombstone":  {},
-		"pinned":     {},
-	}
-	allowedTypes = map[string]struct{}{
-		"bug":     {},
-		"feature": {},
-		"task":    {},
-		"epic":    {},
-		"chore":   {},
-	}
 )
 
 func validateID(id string) bool {
@@ -34,35 +19,29 @@ func validateID(id string) bool {
 }
 
 func normalizeStatus(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "", fmt.Errorf("status is required")
+	status, err := models.ParseTaskStatus(value)
+	if err != nil {
+		return "", badRequestCode(err, ErrCodeInvalidStatus)
 	}
-	if _, ok := allowedStatuses[value]; !ok {
-		return "", fmt.Errorf("invalid status: %s", value)
-	}
-	return value, nil
+	return string(status), nil
 }
 
 func normalizeType(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "", fmt.Errorf("type is required")
+	taskType, err := models.ParseTaskType(value)
+	if err != nil {
+		return "", badRequestCode(err, ErrCodeInvalidType)
 	}
-	if _, ok := allowedTypes[value]; !ok {
-		return "", fmt.Errorf("invalid type: %s", value)
-	}
-	return value, nil
+	return string(taskType), nil
 }
 
 func normalizeLabel(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("label is required")
+		return "", badRequestCode(fmt.Errorf("label is required"), ErrCodeMissingRequired)
 	}
 	for _, r := range value {
 		if r > unicode.MaxASCII || unicode.IsSpace(r) {
-			return "", fmt.Errorf("label must be ascii and non-space")
+			return "", badRequestCode(fmt.Errorf("label must be ascii and non-space"), ErrCodeInvalidLabel)
 		}
 	}
 	return strings.ToLower(value), nil

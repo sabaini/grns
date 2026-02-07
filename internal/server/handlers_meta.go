@@ -13,7 +13,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	info, err := s.store.StoreInfo(r.Context())
 	if err != nil {
-		s.writeErrorReq(w, r, http.StatusInternalServerError, err)
+		s.writeStoreError(w, r, err)
 		return
 	}
 

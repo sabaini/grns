@@ -12,75 +12,156 @@ import (
 	"grns/internal/store"
 )
 
-// TaskService centralizes task validation and defaults.
+// TaskService centralizes task business rules, validation, and orchestration.
 type TaskService struct {
-	store         store.TaskStore
+	store         store.TaskServiceStore
 	projectPrefix string
+	importer      *Importer
 }
 
 // NewTaskService constructs a TaskService.
-func NewTaskService(store store.TaskStore, projectPrefix string) *TaskService {
-	return &TaskService{store: store, projectPrefix: projectPrefix}
+func NewTaskService(store store.TaskServiceStore, projectPrefix string) *TaskService {
+	return &TaskService{
+		store:         store,
+		projectPrefix: projectPrefix,
+		importer:      NewImporter(store),
+	}
 }
 
 // Create creates a task from a request.
 func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (api.TaskResponse, error) {
-	var resp api.TaskResponse
+	prefix, err := normalizePrefix(s.projectPrefix)
+	if err != nil {
+		return api.TaskResponse{}, err
+	}
 
-	if strings.TrimSpace(req.Title) == "" {
-		return resp, badRequest(fmt.Errorf("title is required"))
+	prepared, err := s.prepareCreateRequest(prefix, req, s.store.TaskExists, time.Now().UTC())
+	if err != nil {
+		return api.TaskResponse{}, err
+	}
+
+	if err := s.store.CreateTask(ctx, prepared.task, prepared.labels, prepared.deps); err != nil {
+		if isUniqueConstraint(err) {
+			return api.TaskResponse{}, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
+		}
+		return api.TaskResponse{}, err
+	}
+
+	return prepared.response, nil
+}
+
+// BatchCreate creates tasks in a single transaction.
+func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequest) ([]api.TaskResponse, error) {
+	if len(reqs) == 0 {
+		return nil, badRequestCode(fmt.Errorf("tasks array is required"), ErrCodeMissingRequired)
 	}
 
 	prefix, err := normalizePrefix(s.projectPrefix)
 	if err != nil {
-		return resp, err
+		return nil, err
 	}
 
-	status := defaultStatus
+	reservedIDs := make(map[string]bool, len(reqs))
+	taskExistsCache := make(map[string]bool)
+	exists := func(id string) (bool, error) {
+		if reservedIDs[id] {
+			return true, nil
+		}
+		if cached, ok := taskExistsCache[id]; ok {
+			return cached, nil
+		}
+		found, err := s.store.TaskExists(id)
+		if err != nil {
+			return false, err
+		}
+		taskExistsCache[id] = found
+		return found, nil
+	}
+
+	batch := make([]store.TaskCreateInput, 0, len(reqs))
+	responses := make([]api.TaskResponse, 0, len(reqs))
+	for _, req := range reqs {
+		prepared, err := s.prepareCreateRequest(prefix, req, exists, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		reservedIDs[prepared.task.ID] = true
+		taskExistsCache[prepared.task.ID] = true
+		batch = append(batch, store.TaskCreateInput{Task: prepared.task, Labels: prepared.labels, Deps: prepared.deps})
+		responses = append(responses, prepared.response)
+	}
+
+	if err := s.store.CreateTasks(ctx, batch); err != nil {
+		if isUniqueConstraint(err) {
+			return nil, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
+		}
+		return nil, err
+	}
+
+	return responses, nil
+}
+
+type preparedTaskCreate struct {
+	task     *models.Task
+	labels   []string
+	deps     []models.Dependency
+	response api.TaskResponse
+}
+
+func (s *TaskService) prepareCreateRequest(prefix string, req api.TaskCreateRequest, exists func(string) (bool, error), now time.Time) (preparedTaskCreate, error) {
+	if strings.TrimSpace(req.Title) == "" {
+		return preparedTaskCreate{}, badRequestCode(fmt.Errorf("title is required"), ErrCodeMissingRequired)
+	}
+
+	status := string(models.StatusOpen)
 	if req.Status != nil {
-		status, err = normalizeStatus(*req.Status)
+		value, err := normalizeStatus(*req.Status)
 		if err != nil {
-			return resp, badRequest(err)
+			return preparedTaskCreate{}, badRequest(err)
 		}
+		status = value
 	}
 
-	issueType := defaultType
+	taskType := string(models.TypeTask)
 	if req.Type != nil {
-		issueType, err = normalizeType(*req.Type)
+		value, err := normalizeType(*req.Type)
 		if err != nil {
-			return resp, badRequest(err)
+			return preparedTaskCreate{}, badRequest(err)
 		}
+		taskType = value
 	}
 
-	priority := defaultPriority
+	priority := models.DefaultPriority
 	if req.Priority != nil {
-		if *req.Priority < 0 || *req.Priority > 4 {
-			return resp, badRequest(fmt.Errorf("priority must be between 0 and 4"))
+		if !models.IsValidPriority(*req.Priority) {
+			return preparedTaskCreate{}, badRequestCode(fmt.Errorf("priority must be between %d and %d", models.PriorityMin, models.PriorityMax), ErrCodeInvalidPriority)
 		}
 		priority = *req.Priority
 	}
 
 	labels, err := normalizeLabels(req.Labels)
 	if err != nil {
-		return resp, badRequest(err)
+		return preparedTaskCreate{}, badRequest(err)
 	}
 
 	id := strings.TrimSpace(req.ID)
 	if id != "" {
 		if !validateID(id) || !strings.HasPrefix(id, prefix+"-") {
-			return resp, badRequest(fmt.Errorf("invalid id"))
+			return preparedTaskCreate{}, badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
 		}
-		exists, err := s.store.TaskExists(id)
-		if err != nil {
-			return resp, err
-		}
-		if exists {
-			return resp, conflict(fmt.Errorf("id already exists"))
+		if exists != nil {
+			found, err := exists(id)
+			if err != nil {
+				return preparedTaskCreate{}, err
+			}
+			if found {
+				return preparedTaskCreate{}, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
+			}
 		}
 	} else {
-		id, err = store.GenerateID(prefix, s.store.TaskExists)
+		id, err = store.GenerateID(prefix, exists)
 		if err != nil {
-			return resp, err
+			return preparedTaskCreate{}, err
 		}
 	}
 
@@ -88,7 +169,7 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 	if req.ParentID != nil {
 		parentID = strings.TrimSpace(*req.ParentID)
 		if parentID != "" && !validateID(parentID) {
-			return resp, badRequest(fmt.Errorf("invalid parent_id"))
+			return preparedTaskCreate{}, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
 		}
 	}
 
@@ -96,21 +177,20 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 	for _, dep := range req.Deps {
 		parent := strings.TrimSpace(dep.ParentID)
 		if parent == "" || !validateID(parent) {
-			return resp, badRequest(fmt.Errorf("invalid dependency parent_id"))
+			return preparedTaskCreate{}, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 		}
 		depType := strings.TrimSpace(dep.Type)
 		if depType == "" {
-			depType = "blocks"
+			depType = string(models.DependencyBlocks)
 		}
 		deps = append(deps, models.Dependency{ParentID: parent, Type: depType})
 	}
 
-	now := time.Now().UTC()
 	task := &models.Task{
 		ID:                 id,
 		Title:              strings.TrimSpace(req.Title),
 		Status:             status,
-		Type:               issueType,
+		Type:               taskType,
 		Priority:           priority,
 		Description:        valueOrEmpty(req.Description),
 		SpecID:             valueOrEmpty(req.SpecID),
@@ -124,94 +204,28 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
-	if status == "closed" {
+	if status == string(models.StatusClosed) {
 		task.ClosedAt = &now
 	}
 
-	if err := s.store.CreateTask(ctx, task, labels, deps); err != nil {
-		if isUniqueConstraint(err) {
-			return resp, conflict(fmt.Errorf("id already exists"))
-		}
-		return resp, err
-	}
-
-	resp = api.TaskResponse{Task: *task, Labels: labels, Deps: deps}
-	return resp, nil
+	return preparedTaskCreate{
+		task:     task,
+		labels:   labels,
+		deps:     deps,
+		response: api.TaskResponse{Task: *task, Labels: labels, Deps: deps},
+	}, nil
 }
 
 // Update updates a task and returns the updated response.
 func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateRequest) (api.TaskResponse, error) {
 	var resp api.TaskResponse
 
-	update := store.TaskUpdate{UpdatedAt: time.Now().UTC()}
-	if req.Title != nil {
-		trimmed := strings.TrimSpace(*req.Title)
-		if trimmed == "" {
-			return resp, badRequest(fmt.Errorf("title cannot be empty"))
-		}
-		update.Title = &trimmed
-	}
-	if req.Status != nil {
-		status, err := normalizeStatus(*req.Status)
-		if err != nil {
-			return resp, badRequest(err)
-		}
-		update.Status = &status
-		if status == "closed" {
-			closedAt := update.UpdatedAt
-			update.ClosedAt = &closedAt
-		} else {
-			zero := time.Time{}
-			update.ClosedAt = &zero
-		}
-	}
-	if req.Type != nil {
-		issueType, err := normalizeType(*req.Type)
-		if err != nil {
-			return resp, badRequest(err)
-		}
-		update.Type = &issueType
-	}
-	if req.Priority != nil {
-		if *req.Priority < 0 || *req.Priority > 4 {
-			return resp, badRequest(fmt.Errorf("priority must be between 0 and 4"))
-		}
-		update.Priority = req.Priority
-	}
-	if req.Description != nil {
-		update.Description = req.Description
-	}
-	if req.SpecID != nil {
-		update.SpecID = req.SpecID
-	}
-	if req.ParentID != nil {
-		parent := strings.TrimSpace(*req.ParentID)
-		if parent != "" && !validateID(parent) {
-			return resp, badRequest(fmt.Errorf("invalid parent_id"))
-		}
-		update.ParentID = &parent
-	}
-	if req.Assignee != nil {
-		update.Assignee = req.Assignee
-	}
-	if req.Notes != nil {
-		update.Notes = req.Notes
-	}
-	if req.Design != nil {
-		update.Design = req.Design
-	}
-	if req.AcceptanceCriteria != nil {
-		update.AcceptanceCriteria = req.AcceptanceCriteria
-	}
-	if req.SourceRepo != nil {
-		update.SourceRepo = req.SourceRepo
-	}
-	if req.Custom != nil {
-		custom := req.Custom
-		update.Custom = &custom
+	update, err := buildTaskUpdateFromRequest(req, time.Now().UTC())
+	if err != nil {
+		return resp, err
 	}
 
-	if err := s.store.UpdateTask(ctx, id, update); err != nil {
+	if err := s.store.UpdateTask(ctx, id, update.toStoreTaskUpdate()); err != nil {
 		return resp, err
 	}
 
@@ -227,7 +241,7 @@ func (s *TaskService) Get(ctx context.Context, id string) (api.TaskResponse, err
 		return resp, err
 	}
 	if task == nil {
-		return resp, notFound(fmt.Errorf("task not found"))
+		return resp, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 
 	labels, err := s.store.ListLabels(ctx, id)
@@ -243,16 +257,62 @@ func (s *TaskService) Get(ctx context.Context, id string) (api.TaskResponse, err
 	return resp, nil
 }
 
+// GetMany returns multiple task responses, preserving request order.
+func (s *TaskService) GetMany(ctx context.Context, ids []string) ([]api.TaskResponse, error) {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return nil, badRequestCode(fmt.Errorf("ids are required"), ErrCodeMissingRequired)
+	}
+
+	tasks, err := s.store.ListTasks(ctx, taskListFilter{IDs: ids}.toStoreListFilter())
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) != len(ids) {
+		return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+
+	responsesByTaskOrder, err := s.attachLabelsAndDeps(ctx, tasks)
+	if err != nil {
+		return nil, err
+	}
+
+	byID := make(map[string]api.TaskResponse, len(responsesByTaskOrder))
+	for _, resp := range responsesByTaskOrder {
+		byID[resp.Task.ID] = resp
+	}
+
+	responses := make([]api.TaskResponse, 0, len(ids))
+	for _, id := range ids {
+		resp, ok := byID[id]
+		if !ok {
+			return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+		}
+		responses = append(responses, resp)
+	}
+
+	return responses, nil
+}
+
 // List returns tasks with labels.
-func (s *TaskService) List(ctx context.Context, filter store.ListFilter) ([]api.TaskResponse, error) {
-	tasks, err := s.store.ListTasks(ctx, filter)
+func (s *TaskService) List(ctx context.Context, filter taskListFilter) ([]api.TaskResponse, error) {
+	tasks, err := s.store.ListTasks(ctx, filter.toStoreListFilter())
 	if err != nil {
 		if filter.SearchQuery != "" && isInvalidSearchQuery(err) {
-			return nil, badRequest(fmt.Errorf("invalid search query"))
+			return nil, badRequestCode(fmt.Errorf("invalid search query"), ErrCodeInvalidSearchQuery)
 		}
 		return nil, err
 	}
 	return s.attachLabels(ctx, tasks)
+}
+
+// ExportPage returns one export page hydrated with labels and dependencies.
+func (s *TaskService) ExportPage(ctx context.Context, limit, offset int) ([]api.TaskResponse, error) {
+	tasks, err := s.store.ListTasks(ctx, taskListFilter{Limit: limit, Offset: offset}.toStoreListFilter())
+	if err != nil {
+		return nil, err
+	}
+	return s.attachLabelsAndDeps(ctx, tasks)
 }
 
 // Ready returns ready tasks with labels.
@@ -278,7 +338,7 @@ func (s *TaskService) Close(ctx context.Context, ids []string) error {
 	now := time.Now().UTC()
 	err := s.store.CloseTasks(ctx, ids, now)
 	if errors.Is(err, store.ErrTaskNotFound) {
-		return notFound(fmt.Errorf("task not found"))
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 	return err
 }
@@ -288,7 +348,7 @@ func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
 	now := time.Now().UTC()
 	err := s.store.ReopenTasks(ctx, ids, now)
 	if errors.Is(err, store.ErrTaskNotFound) {
-		return notFound(fmt.Errorf("task not found"))
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 	return err
 }
@@ -296,7 +356,7 @@ func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
 // AddDependency adds a dependency edge between tasks.
 func (s *TaskService) AddDependency(ctx context.Context, childID, parentID, depType string) error {
 	if !validateID(childID) || !validateID(parentID) {
-		return badRequest(fmt.Errorf("invalid dependency ids"))
+		return badRequestCode(fmt.Errorf("invalid dependency ids"), ErrCodeInvalidDependency)
 	}
 	if err := s.ensureTaskExists(childID); err != nil {
 		return err
@@ -306,7 +366,7 @@ func (s *TaskService) AddDependency(ctx context.Context, childID, parentID, depT
 	}
 	depType = strings.TrimSpace(depType)
 	if depType == "" {
-		depType = "blocks"
+		depType = string(models.DependencyBlocks)
 	}
 	return s.store.AddDependency(ctx, childID, parentID, depType)
 }
@@ -314,7 +374,7 @@ func (s *TaskService) AddDependency(ctx context.Context, childID, parentID, depT
 // AddLabels adds labels to a task and returns the updated label set.
 func (s *TaskService) AddLabels(ctx context.Context, id string, labels []string) ([]string, error) {
 	if !validateID(id) {
-		return nil, badRequest(fmt.Errorf("invalid id"))
+		return nil, badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
 	}
 	if err := s.ensureTaskExists(id); err != nil {
 		return nil, err
@@ -332,7 +392,7 @@ func (s *TaskService) AddLabels(ctx context.Context, id string, labels []string)
 // RemoveLabels removes labels from a task and returns the updated label set.
 func (s *TaskService) RemoveLabels(ctx context.Context, id string, labels []string) ([]string, error) {
 	if !validateID(id) {
-		return nil, badRequest(fmt.Errorf("invalid id"))
+		return nil, badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
 	}
 	if err := s.ensureTaskExists(id); err != nil {
 		return nil, err
@@ -347,196 +407,10 @@ func (s *TaskService) RemoveLabels(ctx context.Context, id string, labels []stri
 	return s.store.ListLabels(ctx, id)
 }
 
-// Import processes an import request (two-pass: tasks first, then deps).
+// Import processes an import request.
 func (s *TaskService) Import(ctx context.Context, req api.ImportRequest) (api.ImportResponse, error) {
-	resp := api.ImportResponse{DryRun: req.DryRun, TaskIDs: []string{}}
-
-	dedupe := req.Dedupe
-	if dedupe == "" {
-		dedupe = "skip"
-	}
-	orphan := req.OrphanHandling
-	if orphan == "" {
-		orphan = "allow"
-	}
-
-	normalized := make([]api.TaskImportRecord, len(req.Tasks))
-	actions := make([]importTaskAction, len(req.Tasks))
-	importIDs := make(map[string]bool, len(req.Tasks))
-	taskExistsCache := make(map[string]bool)
-
-	taskExists := func(id string) (bool, error) {
-		exists, ok := taskExistsCache[id]
-		if ok {
-			return exists, nil
-		}
-		exists, err := s.store.TaskExists(id)
-		if err != nil {
-			return false, err
-		}
-		taskExistsCache[id] = exists
-		return exists, nil
-	}
-
-	for i, raw := range req.Tasks {
-		rec, skip, err := normalizeImportRecord(raw)
-		if err != nil {
-			return resp, badRequest(err)
-		}
-		if skip {
-			actions[i] = importActionError
-			resp.Errors++
-			resp.Messages = append(resp.Messages, "skipping record with missing id or title")
-			continue
-		}
-		normalized[i] = rec
-		importIDs[rec.ID] = true
-	}
-
-	for i, rec := range normalized {
-		if rec.ID == "" {
-			continue
-		}
-
-		exists, err := taskExists(rec.ID)
-		if err != nil {
-			return resp, err
-		}
-
-		if exists {
-			switch dedupe {
-			case "skip":
-				actions[i] = importActionSkipped
-				resp.Skipped++
-				resp.TaskIDs = append(resp.TaskIDs, rec.ID)
-				continue
-			case "error":
-				actions[i] = importActionError
-				resp.Errors++
-				resp.Messages = append(resp.Messages, fmt.Sprintf("duplicate id: %s", rec.ID))
-				continue
-			case "overwrite":
-				actions[i] = importActionUpdated
-				if !req.DryRun {
-					title := rec.Title
-					status := rec.Status
-					taskType := rec.Type
-					priority := rec.Priority
-					description := rec.Description
-					specID := rec.SpecID
-					parentID := rec.ParentID
-					assignee := rec.Assignee
-					notes := rec.Notes
-					design := rec.Design
-					acceptanceCriteria := rec.AcceptanceCriteria
-					sourceRepo := rec.SourceRepo
-
-					update := store.TaskUpdate{
-						Title:              &title,
-						Status:             &status,
-						Type:               &taskType,
-						Priority:           &priority,
-						Description:        &description,
-						SpecID:             &specID,
-						ParentID:           &parentID,
-						Assignee:           &assignee,
-						Notes:              &notes,
-						Design:             &design,
-						AcceptanceCriteria: &acceptanceCriteria,
-						SourceRepo:         &sourceRepo,
-						UpdatedAt:          rec.UpdatedAt,
-					}
-					if rec.Status == "closed" {
-						closedAt := rec.UpdatedAt
-						if rec.ClosedAt != nil {
-							closedAt = rec.ClosedAt.UTC()
-						}
-						update.ClosedAt = &closedAt
-					} else {
-						zero := time.Time{}
-						update.ClosedAt = &zero
-					}
-					if rec.Custom != nil {
-						custom := rec.Custom
-						update.Custom = &custom
-					}
-					if err := s.store.UpdateTask(ctx, rec.ID, update); err != nil {
-						return resp, err
-					}
-					if rec.Labels != nil {
-						if err := s.store.ReplaceLabels(ctx, rec.ID, rec.Labels); err != nil {
-							return resp, err
-						}
-					}
-				}
-				resp.Updated++
-				taskExistsCache[rec.ID] = true
-				resp.TaskIDs = append(resp.TaskIDs, rec.ID)
-			}
-		} else {
-			actions[i] = importActionCreated
-			if !req.DryRun {
-				task := rec.Task
-				if err := s.store.CreateTask(ctx, &task, rec.Labels, nil); err != nil {
-					return resp, err
-				}
-			}
-			resp.Created++
-			taskExistsCache[rec.ID] = true
-			resp.TaskIDs = append(resp.TaskIDs, rec.ID)
-		}
-	}
-
-	if !req.DryRun {
-		for i, rec := range normalized {
-			action := actions[i]
-			if action != importActionCreated && action != importActionUpdated {
-				continue
-			}
-			if rec.Deps == nil {
-				continue
-			}
-
-			if action == importActionUpdated {
-				if err := s.store.RemoveDependencies(ctx, rec.ID); err != nil {
-					return resp, err
-				}
-			}
-
-			for _, dep := range rec.Deps {
-				if orphan != "allow" {
-					inBatch := importIDs[dep.ParentID]
-					exists, err := taskExists(dep.ParentID)
-					if err != nil {
-						return resp, err
-					}
-					if !exists && !inBatch {
-						if orphan == "strict" {
-							return resp, badRequest(fmt.Errorf("orphan dependency: %s depends on unknown %s", rec.ID, dep.ParentID))
-						}
-						resp.Messages = append(resp.Messages, fmt.Sprintf("skipped orphan dep: %s -> %s", rec.ID, dep.ParentID))
-						continue
-					}
-				}
-				if err := s.store.AddDependency(ctx, rec.ID, dep.ParentID, dep.Type); err != nil {
-					return resp, err
-				}
-			}
-		}
-	}
-
-	return resp, nil
+	return s.importer.Import(ctx, req)
 }
-
-type importTaskAction int
-
-const (
-	importActionNone importTaskAction = iota
-	importActionCreated
-	importActionUpdated
-	importActionSkipped
-	importActionError
-)
 
 func (s *TaskService) ensureTaskExists(id string) error {
 	exists, err := s.store.TaskExists(id)
@@ -544,107 +418,68 @@ func (s *TaskService) ensureTaskExists(id string) error {
 		return err
 	}
 	if !exists {
-		return notFound(fmt.Errorf("task not found"))
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 	return nil
 }
 
-func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool, error) {
-	rec.ID = strings.TrimSpace(rec.ID)
-	rec.Title = strings.TrimSpace(rec.Title)
-	if rec.ID == "" || rec.Title == "" {
-		return rec, true, nil
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
 	}
-	if !validateID(rec.ID) {
-		return rec, false, fmt.Errorf("invalid id: %s", rec.ID)
-	}
-
-	status, err := normalizeStatus(rec.Status)
-	if err != nil {
-		return rec, false, err
-	}
-	rec.Status = status
-
-	taskType, err := normalizeType(rec.Type)
-	if err != nil {
-		return rec, false, err
-	}
-	rec.Type = taskType
-
-	if rec.Priority < 0 || rec.Priority > 4 {
-		return rec, false, fmt.Errorf("priority must be between 0 and 4")
-	}
-
-	rec.ParentID = strings.TrimSpace(rec.ParentID)
-	if rec.ParentID != "" && !validateID(rec.ParentID) {
-		return rec, false, fmt.Errorf("invalid parent_id")
-	}
-
-	if rec.Labels != nil {
-		labels, err := normalizeLabels(rec.Labels)
-		if err != nil {
-			return rec, false, err
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if seen[value] {
+			continue
 		}
-		rec.Labels = labels
+		seen[value] = true
+		out = append(out, value)
 	}
-
-	if rec.Deps != nil {
-		deps := make([]models.Dependency, 0, len(rec.Deps))
-		for _, dep := range rec.Deps {
-			parentID := strings.TrimSpace(dep.ParentID)
-			if parentID == "" || !validateID(parentID) {
-				return rec, false, fmt.Errorf("invalid dependency parent_id")
-			}
-			depType := strings.TrimSpace(dep.Type)
-			if depType == "" {
-				depType = "blocks"
-			}
-			deps = append(deps, models.Dependency{ParentID: parentID, Type: depType})
-		}
-		rec.Deps = deps
-	}
-
-	now := time.Now().UTC()
-	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = now
-	}
-	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = rec.CreatedAt
-	}
-	if rec.Status == "closed" {
-		if rec.ClosedAt == nil || rec.ClosedAt.IsZero() {
-			closedAt := rec.UpdatedAt
-			rec.ClosedAt = &closedAt
-		}
-	} else {
-		rec.ClosedAt = nil
-	}
-
-	return rec, false, nil
+	return out
 }
 
 func (s *TaskService) attachLabels(ctx context.Context, tasks []models.Task) ([]api.TaskResponse, error) {
-	ids := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		ids = append(ids, task.ID)
+	labelMap, err := s.store.ListLabelsForTasks(ctx, taskIDs(tasks))
+	if err != nil {
+		return nil, err
 	}
+	return mapTaskResponses(tasks, labelMap, nil), nil
+}
 
+func (s *TaskService) attachLabelsAndDeps(ctx context.Context, tasks []models.Task) ([]api.TaskResponse, error) {
+	ids := taskIDs(tasks)
 	labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
+	depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return mapTaskResponses(tasks, labelMap, depMap), nil
+}
 
+func taskIDs(tasks []models.Task) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		ids = append(ids, task.ID)
+	}
+	return ids
+}
+
+func mapTaskResponses(tasks []models.Task, labelMap map[string][]string, depMap map[string][]models.Dependency) []api.TaskResponse {
 	responses := make([]api.TaskResponse, 0, len(tasks))
 	for _, task := range tasks {
 		labels := labelMap[task.ID]
 		if labels == nil {
 			labels = []string{}
 		}
-		responses = append(responses, api.TaskResponse{
-			Task:   task,
-			Labels: labels,
-		})
+		resp := api.TaskResponse{Task: task, Labels: labels}
+		if depMap != nil {
+			resp.Deps = depMap[task.ID]
+		}
+		responses = append(responses, resp)
 	}
-
-	return responses, nil
+	return responses
 }

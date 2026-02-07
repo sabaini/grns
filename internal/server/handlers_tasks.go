@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -9,53 +8,31 @@ import (
 )
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskCloseRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.IDs) == 0 {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("ids are required"))
-		return
-	}
-	for _, id := range req.IDs {
-		if !validateID(id) {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
-			return
-		}
-	}
-
-	if err := s.service.Close(r.Context(), req.IDs); err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+	ids, ok := s.decodeIDsReq(w, r)
+	if !ok {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]any{"ids": req.IDs})
+	if err := s.service.Close(r.Context(), ids); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
 func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskReopenRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.IDs) == 0 {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("ids are required"))
-		return
-	}
-	for _, id := range req.IDs {
-		if !validateID(id) {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
-			return
-		}
-	}
-
-	if err := s.service.Reopen(r.Context(), req.IDs); err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+	ids, ok := s.decodeIDsReq(w, r)
+	if !ok {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]any{"ids": req.IDs})
+	if err := s.service.Reopen(r.Context(), ids); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +44,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	responses, err := s.service.Ready(r.Context(), limit)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -103,7 +80,7 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
 	responses, err := s.service.Stale(r.Context(), cutoff, statuses, limit)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -112,14 +89,13 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req api.TaskCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	if !s.decodeJSONReq(w, r, &req) {
 		return
 	}
 
 	resp, err := s.service.Create(r.Context(), req)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -128,14 +104,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 	var reqs []api.TaskCreateRequest
-	if err := decodeJSON(w, r, &reqs); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	if !s.decodeJSONReq(w, r, &reqs) {
 		return
 	}
 
 	responses, err := s.service.BatchCreate(r.Context(), reqs)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -143,15 +118,14 @@ func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, ok := s.pathIDOrBadRequest(w, r)
+	if !ok {
 		return
 	}
 
 	resp, err := s.service.Get(r.Context(), id)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -159,25 +133,14 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskGetManyRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	ids, ok := s.decodeIDsReq(w, r)
+	if !ok {
 		return
-	}
-	if len(req.IDs) == 0 {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("ids are required"))
-		return
-	}
-	for _, id := range req.IDs {
-		if !validateID(id) {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
-			return
-		}
 	}
 
-	responses, err := s.service.GetMany(r.Context(), req.IDs)
+	responses, err := s.service.GetMany(r.Context(), ids)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -185,21 +148,19 @@ func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, ok := s.pathIDOrBadRequest(w, r)
+	if !ok {
 		return
 	}
 
 	var req api.TaskUpdateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	if !s.decodeJSONReq(w, r, &req) {
 		return
 	}
 
 	resp, err := s.service.Update(r.Context(), id, req)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -223,7 +184,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	responses, err := s.service.List(r.Context(), filter)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 

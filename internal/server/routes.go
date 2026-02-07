@@ -18,6 +18,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/tasks", s.handleListTasks)
 
 	// Task batch operations.
+	mux.HandleFunc("POST /v1/tasks/get", s.handleGetTasks)
 	mux.HandleFunc("POST /v1/tasks/batch", s.handleBatchCreate)
 	mux.HandleFunc("POST /v1/tasks/close", s.handleClose)
 	mux.HandleFunc("POST /v1/tasks/reopen", s.handleReopen)
@@ -73,9 +74,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			expected := "Bearer " + s.apiToken
 			if auth != expected {
 				s.writeError(w, http.StatusUnauthorized, apiError{
-					status: http.StatusUnauthorized,
-					code:   "unauthorized",
-					err:    fmt.Errorf("unauthorized"),
+					status:  http.StatusUnauthorized,
+					code:    "unauthorized",
+					errCode: ErrCodeUnauthorized,
+					err:     fmt.Errorf("unauthorized"),
 				})
 				return
 			}
@@ -85,9 +87,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			adminToken := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
 			if adminToken != s.adminToken {
 				s.writeError(w, http.StatusForbidden, apiError{
-					status: http.StatusForbidden,
-					code:   "forbidden",
-					err:    fmt.Errorf("forbidden"),
+					status:  http.StatusForbidden,
+					code:    "forbidden",
+					errCode: ErrCodeForbidden,
+					err:     fmt.Errorf("forbidden"),
 				})
 				return
 			}

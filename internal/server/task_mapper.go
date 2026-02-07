@@ -7,24 +7,23 @@ import (
 
 	"grns/internal/api"
 	"grns/internal/models"
-	"grns/internal/store"
 )
 
-// buildTaskUpdateFromRequest maps an API update request to a store patch model.
-func buildTaskUpdateFromRequest(req api.TaskUpdateRequest, updatedAt time.Time) (store.TaskUpdate, error) {
-	update := store.TaskUpdate{UpdatedAt: updatedAt}
+// buildTaskUpdateFromRequest maps an API update request to a service patch model.
+func buildTaskUpdateFromRequest(req api.TaskUpdateRequest, updatedAt time.Time) (taskUpdatePatch, error) {
+	update := taskUpdatePatch{UpdatedAt: updatedAt}
 
 	if req.Title != nil {
 		trimmed := strings.TrimSpace(*req.Title)
 		if trimmed == "" {
-			return store.TaskUpdate{}, badRequest(fmt.Errorf("title cannot be empty"))
+			return taskUpdatePatch{}, badRequestCode(fmt.Errorf("title cannot be empty"), ErrCodeMissingRequired)
 		}
 		update.Title = &trimmed
 	}
 	if req.Status != nil {
 		status, err := normalizeStatus(*req.Status)
 		if err != nil {
-			return store.TaskUpdate{}, badRequest(err)
+			return taskUpdatePatch{}, badRequest(err)
 		}
 		update.Status = &status
 		if status == string(models.StatusClosed) {
@@ -38,13 +37,13 @@ func buildTaskUpdateFromRequest(req api.TaskUpdateRequest, updatedAt time.Time) 
 	if req.Type != nil {
 		taskType, err := normalizeType(*req.Type)
 		if err != nil {
-			return store.TaskUpdate{}, badRequest(err)
+			return taskUpdatePatch{}, badRequest(err)
 		}
 		update.Type = &taskType
 	}
 	if req.Priority != nil {
 		if !models.IsValidPriority(*req.Priority) {
-			return store.TaskUpdate{}, badRequest(fmt.Errorf("priority must be between %d and %d", models.PriorityMin, models.PriorityMax))
+			return taskUpdatePatch{}, badRequestCode(fmt.Errorf("priority must be between %d and %d", models.PriorityMin, models.PriorityMax), ErrCodeInvalidPriority)
 		}
 		update.Priority = req.Priority
 	}
@@ -57,7 +56,7 @@ func buildTaskUpdateFromRequest(req api.TaskUpdateRequest, updatedAt time.Time) 
 	if req.ParentID != nil {
 		parent := strings.TrimSpace(*req.ParentID)
 		if parent != "" && !validateID(parent) {
-			return store.TaskUpdate{}, badRequest(fmt.Errorf("invalid parent_id"))
+			return taskUpdatePatch{}, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
 		}
 		update.ParentID = &parent
 	}
@@ -84,8 +83,8 @@ func buildTaskUpdateFromRequest(req api.TaskUpdateRequest, updatedAt time.Time) 
 	return update, nil
 }
 
-// buildTaskUpdateFromImport maps a normalized import record to a store patch model.
-func buildTaskUpdateFromImport(rec api.TaskImportRecord) store.TaskUpdate {
+// buildTaskUpdateFromImport maps a normalized import record to a service patch model.
+func buildTaskUpdateFromImport(rec api.TaskImportRecord) taskUpdatePatch {
 	title := rec.Title
 	status := rec.Status
 	taskType := rec.Type
@@ -99,7 +98,7 @@ func buildTaskUpdateFromImport(rec api.TaskImportRecord) store.TaskUpdate {
 	acceptanceCriteria := rec.AcceptanceCriteria
 	sourceRepo := rec.SourceRepo
 
-	update := store.TaskUpdate{
+	update := taskUpdatePatch{
 		Title:              &title,
 		Status:             &status,
 		Type:               &taskType,

@@ -56,6 +56,29 @@ Supported config keys:
 
 See `docs/security.md` for details.
 
+### API error responses
+
+Error responses are JSON with stable string and numeric codes:
+
+```json
+{
+  "error": "invalid id",
+  "code": "invalid_argument",
+  "error_code": 1004
+}
+```
+
+- `code` remains backward-compatible string classification.
+- `error_code` is a systematic numeric code for machine handling.
+- Numeric code ranges are documented in `docs/errcode-design.md`.
+
+### CLI operator/user error guidance model
+
+- CLI prints the primary error message first (user-facing cause).
+- For startup/autospawn failures, CLI prints actionable hints including API URL checks and the server log path when available.
+- For auth/rate-limit/internal API failures, CLI prints targeted hints (token config, retry/load, inspect server logs).
+- Server `5xx` responses remain sanitized (`"internal error"`) while detailed diagnostics stay in server logs.
+
 ## Commands
 
 ```bash
@@ -91,6 +114,7 @@ grns srv
 ## Import / Export
 
 - `export` writes NDJSON (`application/x-ndjson`)
+- `export` does **not** support `--json` (to avoid ambiguity with JSON arrays)
 - `import` accepts JSONL/NDJSON task records
 - `import --stream` uses chunked server-side processing for large files
 
@@ -111,6 +135,9 @@ Import failure semantics:
 just build
 just test
 just test-integration
+just test-go-perf          # go perf regression budgets
+just bench-go-perf         # go benchmark snapshot
+just test-coverage-critical # critical file coverage guard
 just lint
 ```
 

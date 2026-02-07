@@ -23,4 +23,6 @@ load 'helpers.bash'
   run "$GRNS_BIN" create "Bad api" -t task -p 1 --json
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "api error"
+  echo "$output" | grep -q "hint: verify GRNS_API_URL points to a grns server"
+  echo "$output" | grep -q "hint: inspect server log"
 }

@@ -33,8 +33,7 @@ func newConfigGetCmd(cfg *config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_ = writePlain("%s\n", value)
-			return nil
+			return writePlain("%s\n", value)
 		},
 	}
 }

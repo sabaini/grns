@@ -1,25 +1,19 @@
 package server
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"grns/internal/api"
-	"grns/internal/models"
-	"grns/internal/store"
 )
 
 const (
-	defaultStatus         = "open"
-	defaultType           = "task"
-	defaultPriority       = 2
 	exportPageSize        = 500
 	defaultJSONMaxBody    = 1 << 20  // 1 MiB
 	batchJSONMaxBody      = 8 << 20  // 8 MiB
@@ -28,773 +22,27 @@ const (
 	importStreamMaxLine   = 10 << 20 // 10 MiB
 )
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	info, err := s.store.StoreInfo(r.Context())
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	resp := api.InfoResponse{
-		ProjectPrefix: s.projectPrefix,
-		SchemaVersion: info.SchemaVersion,
-		TaskCounts:    info.TaskCounts,
-		TotalTasks:    info.TotalTasks,
-	}
-
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	nodes, err := s.store.DependencyTree(r.Context(), id)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if nodes == nil {
-		nodes = []models.DepTreeNode{}
-	}
-
-	s.writeJSON(w, http.StatusOK, api.DepTreeResponse{
-		RootID: id,
-		Nodes:  nodes,
-	})
-}
-
-func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskCloseRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.IDs) == 0 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("ids are required"))
-		return
-	}
-	for _, id := range req.IDs {
-		if !validateID(id) {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-			return
-		}
-	}
-
-	if err := s.service.Close(r.Context(), req.IDs); err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]any{"ids": req.IDs})
-}
-
-func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskReopenRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.IDs) == 0 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("ids are required"))
-		return
-	}
-	for _, id := range req.IDs {
-		if !validateID(id) {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-			return
-		}
-	}
-
-	if err := s.service.Reopen(r.Context(), req.IDs); err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]any{"ids": req.IDs})
-}
-
-func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	limit, err := queryInt(r, "limit")
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	responses, err := s.service.Ready(r.Context(), limit)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, responses)
-}
-
-func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
-	days, err := queryIntDefault(r, "days", 30)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	limit, err := queryInt(r, "limit")
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	statuses := splitCSV(r.URL.Query().Get("status"))
-
-	if len(statuses) > 0 {
-		normalized := make([]string, 0, len(statuses))
-		for _, status := range statuses {
-			value, err := normalizeStatus(status)
-			if err != nil {
-				s.writeError(w, http.StatusBadRequest, err)
-				return
-			}
-			normalized = append(normalized, value)
-		}
-		statuses = normalized
-	}
-
-	cutoff := time.Now().UTC().AddDate(0, 0, -days)
-	responses, err := s.service.Stale(r.Context(), cutoff, statuses, limit)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, responses)
-}
-
-func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
-	var req api.DepCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	childID := strings.TrimSpace(req.ChildID)
-	parentID := strings.TrimSpace(req.ParentID)
-	depType := strings.TrimSpace(req.Type)
-	if depType == "" {
-		depType = "blocks"
-	}
-
-	if err := s.service.AddDependency(r.Context(), childID, parentID, depType); err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]any{"child_id": childID, "parent_id": parentID, "type": depType})
-}
-
-func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
-	var req api.CleanupRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.OlderThanDays <= 0 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("older_than_days must be > 0"))
-		return
-	}
-	if !req.DryRun && r.Header.Get("X-Confirm") != "true" {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("non-dry-run requires X-Confirm: true header"))
-		return
-	}
-
-	cutoff := time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
-	result, err := s.store.CleanupClosedTasks(r.Context(), cutoff, req.DryRun)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	resp := api.CleanupResponse{
-		TaskIDs: result.TaskIDs,
-		Count:   result.Count,
-		DryRun:  result.DryRun,
-	}
-	if resp.TaskIDs == nil {
-		resp.TaskIDs = []string{}
-	}
-
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.exportLimiter, w, "export") {
-		return
-	}
-	defer s.releaseLimiter(s.exportLimiter)
-
-	ctx := r.Context()
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-
-	offset := 0
-	for {
-		tasks, err := s.store.ListTasks(ctx, store.ListFilter{Limit: exportPageSize, Offset: offset})
-		if err != nil {
-			s.logger.Error("export list tasks", "error", err)
-			return
-		}
-		if len(tasks) == 0 {
-			return
-		}
-
-		ids := make([]string, 0, len(tasks))
-		for _, t := range tasks {
-			ids = append(ids, t.ID)
-		}
-		labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
-		if err != nil {
-			s.logger.Error("export list labels", "error", err)
-			return
-		}
-		depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
-		if err != nil {
-			s.logger.Error("export list dependencies", "error", err)
-			return
-		}
-
-		for _, t := range tasks {
-			labels := labelMap[t.ID]
-			if labels == nil {
-				labels = []string{}
-			}
-			deps := depMap[t.ID]
-			record := api.TaskResponse{Task: t, Labels: labels, Deps: deps}
-			if err := enc.Encode(record); err != nil {
-				s.logger.Error("export encode", "error", err)
-				return
-			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-		}
-
-		offset += len(tasks)
-	}
-}
-
-func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.importLimiter, w, "import") {
-		return
-	}
-	defer s.releaseLimiter(s.importLimiter)
-
-	var req api.ImportRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	// Validate dedupe.
-	switch req.Dedupe {
-	case "", "skip", "overwrite", "error":
-	default:
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", req.Dedupe))
-		return
-	}
-	// Validate orphan handling.
-	switch req.OrphanHandling {
-	case "", "allow", "skip", "strict":
-	default:
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", req.OrphanHandling))
-		return
-	}
-
-	if len(req.Tasks) == 0 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("tasks array is required"))
-		return
-	}
-
-	resp, err := s.service.Import(r.Context(), req)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
-	if !s.acquireLimiter(s.importLimiter, w, "import") {
-		return
-	}
-	defer s.releaseLimiter(s.importLimiter)
-
-	dedupe := strings.TrimSpace(r.URL.Query().Get("dedupe"))
-	orphanHandling := strings.TrimSpace(r.URL.Query().Get("orphan_handling"))
-	dryRunValue := strings.TrimSpace(r.URL.Query().Get("dry_run"))
-	dryRun := false
-	if dryRunValue != "" {
-		parsed, err := strconv.ParseBool(dryRunValue)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dry_run"))
-			return
-		}
-		dryRun = parsed
-	}
-
-	switch dedupe {
-	case "", "skip", "overwrite", "error":
-	default:
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", dedupe))
-		return
-	}
-	switch orphanHandling {
-	case "", "allow", "skip", "strict":
-	default:
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", orphanHandling))
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, int64(importJSONMaxBody))
-	scanner := bufio.NewScanner(r.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), importStreamMaxLine)
-
-	response := api.ImportResponse{DryRun: dryRun, TaskIDs: []string{}}
-	chunk := make([]api.TaskImportRecord, 0, importStreamChunkSize)
-	lineNum := 0
-	hasRecords := false
-
-	flushChunk := func() error {
-		if len(chunk) == 0 {
-			return nil
-		}
-		resp, err := s.service.Import(r.Context(), api.ImportRequest{
-			Tasks:          chunk,
-			DryRun:         dryRun,
-			Dedupe:         dedupe,
-			OrphanHandling: orphanHandling,
-		})
-		if err != nil {
-			return err
-		}
-		response.Created += resp.Created
-		response.Updated += resp.Updated
-		response.Skipped += resp.Skipped
-		response.Errors += resp.Errors
-		response.TaskIDs = append(response.TaskIDs, resp.TaskIDs...)
-		response.Messages = append(response.Messages, resp.Messages...)
-		chunk = chunk[:0]
-		return nil
-	}
-
-	for scanner.Scan() {
-		lineNum++
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		hasRecords = true
-
-		var rec api.TaskImportRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("line %d: %w", lineNum, err))
-			return
-		}
-		chunk = append(chunk, rec)
-
-		if len(chunk) >= importStreamChunkSize {
-			if err := flushChunk(); err != nil {
-				s.writeError(w, httpStatusFromError(err), err)
-				return
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("reading input: %w", err))
-		return
-	}
-	if !hasRecords {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("no records found in input"))
-		return
-	}
-	if err := flushChunk(); err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, response)
-}
-
-func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
-	labels, err := s.store.ListAllLabels(r.Context())
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, labels)
-}
-
-func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	var req api.TaskCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	resp, err := s.service.Create(r.Context(), req)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusCreated, resp)
-}
-
-func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
-	var reqs []api.TaskCreateRequest
-	if err := decodeJSON(w, r, &reqs); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	responses := make([]api.TaskResponse, 0, len(reqs))
-	for _, req := range reqs {
-		resp, err := s.service.Create(r.Context(), req)
-		if err != nil {
-			s.writeError(w, httpStatusFromError(err), err)
-			return
-		}
-		responses = append(responses, resp)
-	}
-
-	s.writeJSON(w, http.StatusCreated, responses)
-}
-
-func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	resp, err := s.service.Get(r.Context(), id)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	var req api.TaskUpdateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	resp, err := s.service.Update(r.Context(), id, req)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	limit, err := queryInt(r, "limit")
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	offset, err := queryInt(r, "offset")
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	filter := store.ListFilter{
-		Statuses:  splitCSV(r.URL.Query().Get("status")),
-		Types:     splitCSV(r.URL.Query().Get("type")),
-		ParentID:  strings.TrimSpace(r.URL.Query().Get("parent_id")),
-		Labels:    splitCSV(r.URL.Query().Get("label")),
-		LabelsAny: splitCSV(r.URL.Query().Get("label_any")),
-		Limit:     limit,
-		Offset:    offset,
-	}
-
-	if filter.ParentID != "" && !validateID(filter.ParentID) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid parent_id"))
-		return
-	}
-
-	if len(filter.Statuses) > 0 {
-		statuses := make([]string, 0, len(filter.Statuses))
-		for _, status := range filter.Statuses {
-			value, err := normalizeStatus(status)
-			if err != nil {
-				s.writeError(w, http.StatusBadRequest, err)
-				return
-			}
-			statuses = append(statuses, value)
-		}
-		filter.Statuses = statuses
-	}
-	if len(filter.Types) > 0 {
-		types := make([]string, 0, len(filter.Types))
-		for _, t := range filter.Types {
-			value, err := normalizeType(t)
-			if err != nil {
-				s.writeError(w, http.StatusBadRequest, err)
-				return
-			}
-			types = append(types, value)
-		}
-		filter.Types = types
-	}
-
-	if len(filter.Labels) > 0 {
-		labels, err := normalizeLabels(filter.Labels)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		filter.Labels = labels
-	}
-	if len(filter.LabelsAny) > 0 {
-		labels, err := normalizeLabels(filter.LabelsAny)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		filter.LabelsAny = labels
-	}
-
-	if priority := r.URL.Query().Get("priority"); priority != "" {
-		value, err := strconv.Atoi(priority)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid priority"))
-			return
-		}
-		if value < 0 || value > 4 {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("priority must be between 0 and 4"))
-			return
-		}
-		filter.Priority = &value
-	}
-	if priorityMin := r.URL.Query().Get("priority_min"); priorityMin != "" {
-		value, err := strconv.Atoi(priorityMin)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid priority_min"))
-			return
-		}
-		if value < 0 || value > 4 {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("priority_min must be between 0 and 4"))
-			return
-		}
-		filter.PriorityMin = &value
-	}
-	if priorityMax := r.URL.Query().Get("priority_max"); priorityMax != "" {
-		value, err := strconv.Atoi(priorityMax)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid priority_max"))
-			return
-		}
-		if value < 0 || value > 4 {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("priority_max must be between 0 and 4"))
-			return
-		}
-		filter.PriorityMax = &value
-	}
-
-	if filter.PriorityMin != nil && filter.PriorityMax != nil {
-		if *filter.PriorityMin > *filter.PriorityMax {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("priority_min cannot be greater than priority_max"))
-			return
-		}
-	}
-
-	if assignee := strings.TrimSpace(r.URL.Query().Get("assignee")); assignee != "" {
-		filter.Assignee = assignee
-	}
-	if r.URL.Query().Get("no_assignee") == "true" {
-		filter.NoAssignee = true
-	}
-	if ids := splitCSV(r.URL.Query().Get("id")); len(ids) > 0 {
-		filter.IDs = ids
-	}
-	if v := strings.TrimSpace(r.URL.Query().Get("title_contains")); v != "" {
-		filter.TitleContains = v
-	}
-	if v := strings.TrimSpace(r.URL.Query().Get("desc_contains")); v != "" {
-		filter.DescContains = v
-	}
-	if v := strings.TrimSpace(r.URL.Query().Get("notes_contains")); v != "" {
-		filter.NotesContains = v
-	}
-	if v := r.URL.Query().Get("created_after"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid created_after: %w", err))
-			return
-		}
-		filter.CreatedAfter = &t
-	}
-	if v := r.URL.Query().Get("created_before"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid created_before: %w", err))
-			return
-		}
-		filter.CreatedBefore = &t
-	}
-	if v := r.URL.Query().Get("updated_after"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid updated_after: %w", err))
-			return
-		}
-		filter.UpdatedAfter = &t
-	}
-	if v := r.URL.Query().Get("updated_before"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid updated_before: %w", err))
-			return
-		}
-		filter.UpdatedBefore = &t
-	}
-	if v := r.URL.Query().Get("closed_after"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid closed_after: %w", err))
-			return
-		}
-		filter.ClosedAfter = &t
-	}
-	if v := r.URL.Query().Get("closed_before"); v != "" {
-		t, err := parseFlexibleTime(v)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid closed_before: %w", err))
-			return
-		}
-		filter.ClosedBefore = &t
-	}
-	if r.URL.Query().Get("empty_description") == "true" {
-		filter.EmptyDescription = true
-	}
-	if r.URL.Query().Get("no_labels") == "true" {
-		filter.NoLabels = true
-	}
-	if search := strings.TrimSpace(r.URL.Query().Get("search")); search != "" {
-		filter.SearchQuery = search
-	}
-
-	spec := strings.TrimSpace(r.URL.Query().Get("spec"))
-	if spec != "" {
-		pattern := "(?i)" + spec
-		if _, err := regexp.Compile(pattern); err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid spec regex"))
-			return
-		}
-		filter.SpecRegex = pattern
-	}
-
-	heavySearch := filter.SearchQuery != "" || filter.SpecRegex != ""
-	if heavySearch {
-		if !s.acquireLimiter(s.searchLimiter, w, "search") {
-			return
-		}
-		defer s.releaseLimiter(s.searchLimiter)
-	}
-
-	responses, err := s.service.List(r.Context(), filter)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, responses)
-}
-
-func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	labels, err := s.store.ListLabels(r.Context(), id)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, labels)
-}
-
-func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	var req api.LabelsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	labels, err := s.service.AddLabels(r.Context(), id, req.Labels)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, labels)
-}
-
-func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
-		return
-	}
-
-	var req api.LabelsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	labels, err := s.service.RemoveLabels(r.Context(), id, req.Labels)
-	if err != nil {
-		s.writeError(w, httpStatusFromError(err), err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, labels)
-}
-
 func (s *Server) writeError(w http.ResponseWriter, status int, err error) {
+	s.writeErrorReq(w, nil, status, err)
+}
+
+func (s *Server) writeErrorReq(w http.ResponseWriter, r *http.Request, status int, err error) {
+	if err == nil {
+		err = errors.New(http.StatusText(status))
+	}
+
 	code := errorCode(status, err)
+	errorCode := errorNumericCode(status, err)
 	message := err.Error()
 	if status >= 500 {
-		s.logger.Error("request error", "status", status, "code", code, "error", err)
+		fields := []any{"status", status, "code", code, "error_code", errorCode, "error", err}
+		if r != nil {
+			fields = append(fields, "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+		}
+		s.logger.Error("request error", fields...)
 		message = "internal error"
 	}
-	s.writeJSON(w, status, api.ErrorResponse{Error: message, Code: code})
+	s.writeJSON(w, status, api.ErrorResponse{Error: message, Code: code, ErrorCode: errorCode})
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -806,50 +54,109 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 type apiError struct {
-	status int
-	code   string
-	err    error
+	status  int
+	code    string
+	errCode int
+	err     error
 }
 
 func (e apiError) Error() string {
+	if e.err == nil {
+		return ""
+	}
 	return e.err.Error()
 }
 
+func (e apiError) Unwrap() error {
+	return e.err
+}
+
+func makeAPIError(status int, code string, errCode int, err error) error {
+	if err == nil {
+		err = errors.New(http.StatusText(status))
+	}
+
+	var existing apiError
+	if errors.As(err, &existing) {
+		if existing.status != 0 {
+			return existing
+		}
+	}
+
+	return apiError{status: status, code: code, errCode: errCode, err: err}
+}
+
 func badRequest(err error) error {
-	return apiError{status: http.StatusBadRequest, code: "invalid_argument", err: err}
+	return badRequestCode(err, ErrCodeInvalidArgument)
+}
+
+func badRequestCode(err error, code int) error {
+	return makeAPIError(http.StatusBadRequest, "invalid_argument", code, err)
 }
 
 func notFound(err error) error {
-	return apiError{status: http.StatusNotFound, code: "not_found", err: err}
+	return notFoundCode(err, ErrCodeTaskNotFound)
+}
+
+func notFoundCode(err error, code int) error {
+	return makeAPIError(http.StatusNotFound, "not_found", code, err)
 }
 
 func conflict(err error) error {
-	return apiError{status: http.StatusConflict, code: "conflict", err: err}
+	return conflictCode(err, ErrCodeConflict)
+}
+
+func conflictCode(err error, code int) error {
+	return makeAPIError(http.StatusConflict, "conflict", code, err)
+}
+
+func internalError(err error) error {
+	return makeAPIError(http.StatusInternalServerError, "internal", ErrCodeInternal, err)
+}
+
+func storeFailure(err error) error {
+	return makeAPIError(http.StatusInternalServerError, "internal", ErrCodeStoreFailure, err)
 }
 
 func httpStatusFromError(err error) int {
-	if apiErr, ok := err.(apiError); ok {
+	var apiErr apiError
+	if errors.As(err, &apiErr) {
 		return apiErr.status
 	}
 	return http.StatusInternalServerError
 }
 
 func errorCode(status int, err error) string {
-	if apiErr, ok := err.(apiError); ok && apiErr.code != "" {
+	var apiErr apiError
+	if errors.As(err, &apiErr) && apiErr.code != "" {
 		return apiErr.code
 	}
 	switch status {
 	case http.StatusBadRequest:
 		return "invalid_argument"
+	case http.StatusUnauthorized:
+		return "unauthorized"
+	case http.StatusForbidden:
+		return "forbidden"
 	case http.StatusNotFound:
 		return "not_found"
 	case http.StatusConflict:
 		return "conflict"
+	case http.StatusTooManyRequests:
+		return "resource_exhausted"
 	case http.StatusInternalServerError:
 		return "internal"
 	default:
 		return ""
 	}
+}
+
+func errorNumericCode(status int, err error) int {
+	var apiErr apiError
+	if errors.As(err, &apiErr) && apiErr.errCode > 0 {
+		return apiErr.errCode
+	}
+	return defaultErrorCodeByStatus(status)
 }
 
 func isUniqueConstraint(err error) bool {
@@ -882,6 +189,80 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	return json.NewDecoder(r.Body).Decode(dst)
 }
 
+func classifyDecodeJSONError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return badRequestCode(fmt.Errorf("request body too large"), ErrCodeRequestTooLarge)
+	}
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return badRequestCode(fmt.Errorf("invalid JSON payload"), ErrCodeInvalidJSON)
+	}
+
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return badRequestCode(err, ErrCodeInvalidJSON)
+	}
+
+	var unmarshalErr *json.UnmarshalTypeError
+	if errors.As(err, &unmarshalErr) {
+		return badRequestCode(err, ErrCodeInvalidJSON)
+	}
+
+	return badRequestCode(err, ErrCodeInvalidJSON)
+}
+
+func (s *Server) decodeJSONReq(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := decodeJSON(w, r, dst); err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, classifyDecodeJSONError(err))
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	s.writeErrorReq(w, r, httpStatusFromError(err), err)
+}
+
+func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
+	s.writeErrorReq(w, r, http.StatusInternalServerError, storeFailure(err))
+}
+
+func (s *Server) withLimiter(w http.ResponseWriter, limiter chan struct{}, name string, fn func()) {
+	if !s.acquireLimiter(limiter, w, name) {
+		return
+	}
+	defer s.releaseLimiter(limiter)
+	fn()
+}
+
+func (s *Server) pathIDOrBadRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, err := requirePathID(r)
+	if err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+		return "", false
+	}
+	return id, true
+}
+
+func (s *Server) decodeIDsReq(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if !s.decodeJSONReq(w, r, &req) {
+		return nil, false
+	}
+	if err := requireIDs(req.IDs); err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+		return nil, false
+	}
+	return req.IDs, true
+}
+
 func splitCSV(value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -899,6 +280,40 @@ func splitCSV(value string) []string {
 	return out
 }
 
+func requirePathID(r *http.Request) (string, error) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !validateID(id) {
+		return "", badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
+	}
+	return id, nil
+}
+
+func requireIDs(ids []string) error {
+	if len(ids) == 0 {
+		return badRequestCode(fmt.Errorf("ids are required"), ErrCodeMissingRequired)
+	}
+	for _, id := range ids {
+		if !validateID(id) {
+			return badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
+		}
+	}
+	return nil
+}
+
+func validateImportModes(dedupe, orphanHandling string) error {
+	switch dedupe {
+	case "", "skip", "overwrite", "error":
+	default:
+		return badRequestCode(fmt.Errorf("invalid dedupe mode: %s", dedupe), ErrCodeInvalidImportMode)
+	}
+	switch orphanHandling {
+	case "", "allow", "skip", "strict":
+	default:
+		return badRequestCode(fmt.Errorf("invalid orphan_handling: %s", orphanHandling), ErrCodeInvalidImportMode)
+	}
+	return nil
+}
+
 func queryInt(r *http.Request, key string) (int, error) {
 	value := strings.TrimSpace(r.URL.Query().Get(key))
 	if value == "" {
@@ -906,10 +321,10 @@ func queryInt(r *http.Request, key string) (int, error) {
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("invalid %s", key)
+		return 0, badRequestCode(fmt.Errorf("invalid %s", key), ErrCodeInvalidQuery)
 	}
 	if parsed < 0 {
-		return 0, fmt.Errorf("%s must be >= 0", key)
+		return 0, badRequestCode(fmt.Errorf("%s must be >= 0", key), ErrCodeInvalidQuery)
 	}
 	return parsed, nil
 }
@@ -921,10 +336,22 @@ func queryIntDefault(r *http.Request, key string, def int) (int, error) {
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("invalid %s", key)
+		return 0, badRequestCode(fmt.Errorf("invalid %s", key), ErrCodeInvalidQuery)
 	}
 	if parsed < 0 {
-		return 0, fmt.Errorf("%s must be >= 0", key)
+		return 0, badRequestCode(fmt.Errorf("%s must be >= 0", key), ErrCodeInvalidQuery)
+	}
+	return parsed, nil
+}
+
+func queryBool(r *http.Request, key string) (bool, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, badRequestCode(fmt.Errorf("invalid %s", key), ErrCodeInvalidQuery)
 	}
 	return parsed, nil
 }
@@ -946,5 +373,5 @@ func parseFlexibleTime(value string) (time.Time, error) {
 	if err == nil {
 		return t, nil
 	}
-	return time.Time{}, fmt.Errorf("expected RFC3339 or YYYY-MM-DD format")
+	return time.Time{}, badRequestCode(fmt.Errorf("expected RFC3339 or YYYY-MM-DD format"), ErrCodeInvalidTimeFilter)
 }

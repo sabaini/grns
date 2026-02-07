@@ -17,8 +17,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if cfg.TrustedProjectConfigPath != "" {
+		fmt.Fprintf(os.Stderr, "warning: using trusted project config from %s\n", cfg.TrustedProjectConfigPath)
+	}
+
 	if err := newRootCmd(cfg).Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		for _, line := range formatCLIError(err) {
+			fmt.Fprintln(os.Stderr, line)
+		}
 		os.Exit(1)
 	}
 }

@@ -5,7 +5,7 @@ load 'helpers.bash'
   [ "$status" -eq 0 ]
   id="$(printf '%s' "$output" | json_get id)"
 
-  run "$GRNS_BIN" label add "$id" urgent --json
+  run "$GRNS_BIN" label add --json "$id" urgent
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" label list "$id" --json
@@ -13,7 +13,7 @@ load 'helpers.bash'
   has_label="$(printf '%s' "$output" | json_array_contains_value urgent)"
   [ "$has_label" = "true" ]
 
-  run "$GRNS_BIN" label remove "$id" urgent --json
+  run "$GRNS_BIN" label remove --json "$id" urgent
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" label list "$id" --json
@@ -27,10 +27,10 @@ load 'helpers.bash'
   [ "$status" -eq 0 ]
   id="$(printf '%s' "$output" | json_get id)"
 
-  run "$GRNS_BIN" label add "$id" Urgent --json
+  run "$GRNS_BIN" label add --json "$id" Urgent
   [ "$status" -eq 0 ]
 
-  run "$GRNS_BIN" label add "$id" urgent --json
+  run "$GRNS_BIN" label add --json "$id" urgent
   [ "$status" -eq 0 ]
 
   run "$GRNS_BIN" label list "$id" --json

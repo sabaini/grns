@@ -13,13 +13,13 @@ func TestValidateID(t *testing.T) {
 		{"", false},
 		{"gr", false},
 		{"gr-", false},
-		{"gr-abc", false},     // too short
-		{"gr-abcde", false},   // too long
-		{"GR-ab12", false},    // uppercase prefix
-		{"gr-AB12", false},    // uppercase hash
-		{"gr_ab12", false},    // wrong separator
-		{"abc-ab12", false},   // 3-letter prefix
-		{"g-ab12", false},     // 1-letter prefix
+		{"gr-abc", false},   // too short
+		{"gr-abcde", false}, // too long
+		{"GR-ab12", false},  // uppercase prefix
+		{"gr-AB12", false},  // uppercase hash
+		{"gr_ab12", false},  // wrong separator
+		{"abc-ab12", false}, // 3-letter prefix
+		{"g-ab12", false},   // 1-letter prefix
 	}
 
 	for _, tt := range tests {
@@ -101,8 +101,8 @@ func TestNormalizeLabel(t *testing.T) {
 		{"critical", "critical", false},
 		{"a-b", "a-b", false},
 		{"", "", true},
-		{"hello world", "", true},   // contains space
-		{"café", "", true},          // non-ASCII
+		{"hello world", "", true}, // contains space
+		{"café", "", true},        // non-ASCII
 	}
 
 	for _, tt := range tests {
@@ -127,10 +127,10 @@ func TestNormalizePrefix(t *testing.T) {
 		{"gr", "gr", false},
 		{"GR", "gr", false},
 		{"ab", "ab", false},
-		{"a", "", true},     // too short
-		{"abc", "", true},   // too long
-		{"12", "", true},    // digits
-		{"a1", "", true},    // mixed
+		{"a", "", true},   // too short
+		{"abc", "", true}, // too long
+		{"12", "", true},  // digits
+		{"a1", "", true},  // mixed
 	}
 
 	for _, tt := range tests {

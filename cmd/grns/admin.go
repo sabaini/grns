@@ -52,12 +52,18 @@ func newAdminCleanupCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				}
 
 				if resp.DryRun {
-					_ = writePlain("dry run: %d closed tasks would be removed\n", resp.Count)
+					if err := writePlain("dry run: %d closed tasks would be removed\n", resp.Count); err != nil {
+						return err
+					}
 				} else {
-					_ = writePlain("removed %d closed tasks\n", resp.Count)
+					if err := writePlain("removed %d closed tasks\n", resp.Count); err != nil {
+						return err
+					}
 				}
 				for _, id := range resp.TaskIDs {
-					_ = writePlain("  %s\n", id)
+					if err := writePlain("  %s\n", id); err != nil {
+						return err
+					}
 				}
 				return nil
 			})

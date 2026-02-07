@@ -44,15 +44,11 @@ load 'helpers.bash'
   run "$GRNS_BIN" create "Child" -t task -p 1 --deps "$parent_id" --json
   [ "$status" -eq 0 ]
   child_id="$(printf '%s' "$output" | json_get id)"
-  dep_parent="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['deps'][0]['parent_id'])")"
-  dep_type="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['deps'][0]['type'])")"
-  [ "$dep_parent" = "$parent_id" ]
-  [ "$dep_type" = "blocks" ]
+  has_dep="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print('true' if any(d.get('parent_id') == '$parent_id' and d.get('type') == 'blocks' for d in data.get('deps', [])) else 'false')")"
+  [ "$has_dep" = "true" ]
 
   run "$GRNS_BIN" show "$child_id" --json
   [ "$status" -eq 0 ]
-  dep_parent="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['deps'][0]['parent_id'])")"
-  dep_type="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['deps'][0]['type'])")"
-  [ "$dep_parent" = "$parent_id" ]
-  [ "$dep_type" = "blocks" ]
+  has_dep="$(printf '%s' "$output" | python3 -c "import sys, json; data=json.load(sys.stdin); print('true' if any(d.get('parent_id') == '$parent_id' and d.get('type') == 'blocks' for d in data.get('deps', [])) else 'false')")"
+  [ "$has_dep" = "true" ]
 }

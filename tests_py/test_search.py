@@ -18,8 +18,8 @@ def test_search_finds_by_title(running_server):
 
     results = json_stdout(run_grns(env, "list", "--search", "authentication", "--json"))
     assert len(results) == 1
-    assert results[0]["id"] == auth["id"]
-    assert results[0]["title"] == "Authentication module"
+    assert {item["id"] for item in results} == {auth["id"]}
+    assert {item["title"] for item in results} == {"Authentication module"}
 
 
 def test_search_finds_by_description(running_server):
@@ -32,8 +32,9 @@ def test_search_finds_by_description(running_server):
 
     results = json_stdout(run_grns(env, "list", "--search", "OAuth", "--json"))
     assert len(results) == 1
-    assert results[0]["id"] == auth["id"]
-    assert results[0]["id"] != cache["id"]
+    result_ids = {item["id"] for item in results}
+    assert auth["id"] in result_ids
+    assert cache["id"] not in result_ids
 
 
 def test_search_no_results(running_server):
@@ -55,8 +56,9 @@ def test_search_composes_with_status_filter(running_server):
 
     results = json_stdout(run_grns(env, "list", "--search", "searchable", "--status", "open", "--json"))
     assert len(results) == 1
-    assert results[0]["id"] == open_task["id"]
-    assert results[0]["status"] == "open"
+    result_ids = {item["id"] for item in results}
+    assert open_task["id"] in result_ids
+    assert all(item["status"] == "open" for item in results)
 
 
 def test_search_rejects_malformed_query(running_server):

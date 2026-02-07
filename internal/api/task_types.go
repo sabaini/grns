@@ -41,7 +41,6 @@ type TaskUpdateRequest struct {
 
 // InfoResponse is the response from GET /v1/info.
 type InfoResponse struct {
-	DBPath        string         `json:"db_path"`
 	ProjectPrefix string         `json:"project_prefix"`
 	SchemaVersion int            `json:"schema_version"`
 	TaskCounts    map[string]int `json:"task_counts"`
@@ -96,6 +95,11 @@ type TaskResponse struct {
 	Deps   []models.Dependency `json:"deps,omitempty"`
 }
 
+// TaskGetManyRequest defines payload for bulk task retrieval.
+type TaskGetManyRequest struct {
+	IDs []string `json:"ids"`
+}
+
 // TaskImportRecord represents one task in an import payload.
 type TaskImportRecord struct {
 	models.Task
@@ -109,15 +113,18 @@ type ImportRequest struct {
 	DryRun         bool               `json:"dry_run"`
 	Dedupe         string             `json:"dedupe"`
 	OrphanHandling string             `json:"orphan_handling"`
+	Atomic         bool               `json:"atomic,omitempty"`
 }
 
 // ImportResponse is the response from POST /v1/import.
 type ImportResponse struct {
-	Created  int      `json:"created"`
-	Updated  int      `json:"updated"`
-	Skipped  int      `json:"skipped"`
-	Errors   int      `json:"errors"`
-	DryRun   bool     `json:"dry_run"`
-	TaskIDs  []string `json:"task_ids"`
-	Messages []string `json:"messages,omitempty"`
+	Created       int      `json:"created"`
+	Updated       int      `json:"updated"`
+	Skipped       int      `json:"skipped"`
+	Errors        int      `json:"errors"`
+	DryRun        bool     `json:"dry_run"`
+	TaskIDs       []string `json:"task_ids"`
+	Messages      []string `json:"messages,omitempty"`
+	ApplyMode     string   `json:"apply_mode,omitempty"`
+	AppliedChunks int      `json:"applied_chunks,omitempty"`
 }

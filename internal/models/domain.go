@@ -40,6 +40,8 @@ const (
 	PriorityMin     = 0
 	PriorityMax     = 4
 	DefaultPriority = 2
+
+	DependencyTreeMaxDepth = 50
 )
 
 var validTaskStatuses = map[TaskStatus]struct{}{
@@ -58,6 +60,19 @@ var validTaskTypes = map[TaskType]struct{}{
 	TypeTask:    {},
 	TypeEpic:    {},
 	TypeChore:   {},
+}
+
+var readyTaskStatuses = []TaskStatus{
+	StatusOpen,
+	StatusInProgress,
+	StatusBlocked,
+	StatusDeferred,
+	StatusPinned,
+}
+
+var staleDefaultExcludedStatuses = []TaskStatus{
+	StatusClosed,
+	StatusTombstone,
 }
 
 func IsValidTaskStatus(status TaskStatus) bool {
@@ -92,6 +107,22 @@ func ParseTaskType(raw string) (TaskType, error) {
 	return value, nil
 }
 
+func ReadyTaskStatusStrings() []string {
+	return statusStrings(readyTaskStatuses)
+}
+
+func StaleDefaultExcludedStatusStrings() []string {
+	return statusStrings(staleDefaultExcludedStatuses)
+}
+
 func IsValidPriority(value int) bool {
 	return value >= PriorityMin && value <= PriorityMax
+}
+
+func statusStrings(values []TaskStatus) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, string(value))
+	}
+	return out
 }

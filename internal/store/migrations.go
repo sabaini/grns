@@ -15,8 +15,8 @@ type Migration struct {
 
 // MigrationStatus reports the current and available migration versions.
 type MigrationStatus struct {
-	CurrentVersion   int         `json:"current_version"`
-	AvailableVersion int         `json:"available_version"`
+	CurrentVersion   int             `json:"current_version"`
+	AvailableVersion int             `json:"available_version"`
 	Pending          []MigrationInfo `json:"pending"`
 }
 
@@ -114,6 +114,15 @@ END;
 CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks BEGIN
 	DELETE FROM tasks_fts WHERE task_id = old.id;
 END;
+`,
+	},
+	{
+		Version:     4,
+		Description: "list query index tuning from measured query plans",
+		SQL: `
+CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_desc ON tasks(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_type_updated_desc ON tasks(type, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee_updated_desc ON tasks(assignee, updated_at DESC);
 `,
 	},
 }

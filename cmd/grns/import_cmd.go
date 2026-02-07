@@ -19,6 +19,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		dryRun         bool
 		dedupe         string
 		orphanHandling string
+		atomic         bool
 		stream         bool
 	)
 
@@ -42,7 +43,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 					importErr error
 				)
 				if stream {
-					resp, importErr = client.ImportStream(cmd.Context(), f, dryRun, dedupe, orphanHandling)
+					resp, importErr = client.ImportStream(cmd.Context(), f, dryRun, dedupe, orphanHandling, atomic)
 				} else {
 					// Preserve existing import semantics by default.
 					var records []api.TaskImportRecord
@@ -72,6 +73,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 						DryRun:         dryRun,
 						Dedupe:         dedupe,
 						OrphanHandling: orphanHandling,
+						Atomic:         atomic,
 					})
 				}
 				if importErr != nil {
@@ -82,6 +84,10 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 					return writeJSON(resp)
 				}
 
+				if resp.ApplyMode != "" {
+					return writePlain("created: %d, updated: %d, skipped: %d, errors: %d (mode=%s, checkpoints=%d)\n",
+						resp.Created, resp.Updated, resp.Skipped, resp.Errors, resp.ApplyMode, resp.AppliedChunks)
+				}
 				return writePlain("created: %d, updated: %d, skipped: %d, errors: %d\n",
 					resp.Created, resp.Updated, resp.Skipped, resp.Errors)
 			})
@@ -92,6 +98,7 @@ func newImportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without making changes")
 	cmd.Flags().StringVar(&dedupe, "dedupe", "skip", "dedupe mode: skip|overwrite|error")
 	cmd.Flags().StringVar(&orphanHandling, "orphan-handling", "allow", "orphan dep handling: allow|skip|strict")
+	cmd.Flags().BoolVar(&atomic, "atomic", false, "apply each import request/chunk in a single DB transaction")
 	cmd.Flags().BoolVar(&stream, "stream", false, "use streaming import endpoint for large files")
 
 	return cmd

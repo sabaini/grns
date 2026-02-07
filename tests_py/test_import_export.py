@@ -25,8 +25,8 @@ def test_export_produces_jsonl(running_server):
     lines = [l for l in proc.stdout.strip().split("\n") if l]
     assert len(lines) == 2
 
-    first = json.loads(lines[0])
-    assert "id" in first
+    records = [json.loads(line) for line in lines]
+    assert all("id" in record for record in records)
 
 
 def test_export_to_file(running_server, tmp_path):
@@ -149,8 +149,8 @@ def test_round_trip_preserves_data(running_server, make_server, tmp_path):
 
         deps = shown.get("deps", [])
         assert len(deps) == 1
-        assert deps[0]["parent_id"] == parent_id
-        assert deps[0]["type"] == "blocks"
+        dep_pairs = {(dep["parent_id"], dep["type"]) for dep in deps}
+        assert dep_pairs == {(parent_id, "blocks")}
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,8 @@ def test_import_dedupe_does_not_rewrite_deps(running_server, tmp_path, dedupe_mo
     run_grns(env, "import", "-i", str(infile), "--dedupe", dedupe_mode, "--json")
 
     shown = json_stdout(run_grns(env, "show", "gr-ch11", "--json"))
-    assert shown["deps"][0]["parent_id"] == "gr-pa11"
+    dep_parent_ids = {dep["parent_id"] for dep in shown.get("deps", [])}
+    assert dep_parent_ids == {"gr-pa11"}
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +230,8 @@ def test_overwrite_without_deps_field_preserves(running_server, tmp_path):
     run_grns(env, "import", "-i", str(infile), "--dedupe", "overwrite", "--json")
 
     shown = json_stdout(run_grns(env, "show", "gr-ch11", "--json"))
-    assert shown["deps"][0]["parent_id"] == "gr-pa11"
+    dep_parent_ids = {dep["parent_id"] for dep in shown.get("deps", [])}
+    assert dep_parent_ids == {"gr-pa11"}
 
 
 # ---------------------------------------------------------------------------

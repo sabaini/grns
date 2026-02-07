@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,9 @@ func newExportCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		Use:   "export",
 		Short: "Export all tasks as JSONL",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonOutput != nil && *jsonOutput {
+				return fmt.Errorf("export always emits NDJSON; remove --json")
+			}
 			return withClient(cfg, func(client *api.Client) error {
 				w := os.Stdout
 				if outputPath != "" {

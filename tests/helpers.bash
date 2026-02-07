@@ -50,6 +50,11 @@ json_array_field() {
   python3 -c "import sys, json; data=json.load(sys.stdin); print('\n'.join([str(item.get('$key','')) for item in data]))"
 }
 
+json_array_field_sorted() {
+  local key="$1"
+  python3 -c "import sys, json; data=json.load(sys.stdin); values=[str(item.get('$key','')) for item in data]; print('\n'.join(sorted(values)))"
+}
+
 json_array_contains_value() {
   local value="$1"
   python3 -c "import sys, json; data=json.load(sys.stdin); print('true' if '$value' in data else 'false')"

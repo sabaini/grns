@@ -10,8 +10,10 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "grns",
-		Short: "Grns is a lightweight issue tracker and memory system for agents",
+		Use:           "grns",
+		Short:         "Grns is a lightweight task tracker and memory system for agents",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	cmd.Version = version

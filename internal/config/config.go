@@ -4,21 +4,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 const (
-	DefaultProjectPrefix = "gr"
-	DefaultAPIURL        = "http://127.0.0.1:7333"
-	DefaultDBFileName    = ".grns.db"
+	DefaultProjectPrefix     = "gr"
+	DefaultAPIURL            = "http://127.0.0.1:7333"
+	DefaultDBFileName        = ".grns.db"
+	configDirEnvKey          = "GRNS_CONFIG_DIR"
+	trustProjectConfigEnvKey = "GRNS_TRUST_PROJECT_CONFIG"
 )
 
 // Config defines runtime configuration for grns.
 type Config struct {
-	ProjectPrefix string `toml:"project_prefix"`
-	APIURL        string `toml:"api_url"`
-	DBPath        string `toml:"db_path"`
+	ProjectPrefix            string `toml:"project_prefix"`
+	APIURL                   string `toml:"api_url"`
+	DBPath                   string `toml:"db_path"`
+	TrustedProjectConfigPath string `toml:"-"`
 }
 
 // Default returns default configuration values.
@@ -45,6 +50,26 @@ func loadFile(path string, cfg *Config) error {
 		return fmt.Errorf("failed to parse config %s: %w", path, err)
 	}
 	return nil
+}
+
+func overrideConfigPath() (string, bool) {
+	dir := strings.TrimSpace(os.Getenv(configDirEnvKey))
+	if dir == "" {
+		return "", false
+	}
+	return filepath.Join(dir, ".grns.toml"), true
+}
+
+func trustProjectConfig() bool {
+	raw := strings.TrimSpace(os.Getenv(trustProjectConfigEnvKey))
+	if raw == "" {
+		return false
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return value
 }
 
 var allowedKeys = []string{"project_prefix", "api_url", "db_path"}
@@ -80,6 +105,9 @@ func (c *Config) Get(key string) (string, error) {
 
 // GlobalPath returns the path to the global config file.
 func GlobalPath() (string, error) {
+	if path, ok := overrideConfigPath(); ok {
+		return path, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -89,6 +117,9 @@ func GlobalPath() (string, error) {
 
 // ProjectPath returns the path to the project config file.
 func ProjectPath() (string, error) {
+	if path, ok := overrideConfigPath(); ok {
+		return path, nil
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -111,6 +142,10 @@ func SetKey(path, key, value string) error {
 
 	data[key] = value
 
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -120,24 +155,41 @@ func SetKey(path, key, value string) error {
 	return toml.NewEncoder(f).Encode(data)
 }
 
-// Load reads config from global and project files and applies env overrides.
+// Load reads config from trusted files and applies env overrides.
 func Load() (*Config, error) {
 	cfg := Default()
 
-	if home, err := os.UserHomeDir(); err == nil {
-		globalPath := filepath.Join(home, ".grns.toml")
-		if err := loadFile(globalPath, &cfg); err != nil {
+	if overridePath, ok := overrideConfigPath(); ok {
+		if err := loadFile(overridePath, &cfg); err != nil {
 			return nil, err
+		}
+	} else {
+		if home, err := os.UserHomeDir(); err == nil {
+			globalPath := filepath.Join(home, ".grns.toml")
+			if err := loadFile(globalPath, &cfg); err != nil {
+				return nil, err
+			}
+		}
+
+		if trustProjectConfig() {
+			if cwd, err := os.Getwd(); err == nil {
+				projectPath := filepath.Join(cwd, ".grns.toml")
+				info, statErr := os.Stat(projectPath)
+				switch {
+				case statErr == nil && !info.IsDir():
+					if err := loadFile(projectPath, &cfg); err != nil {
+						return nil, err
+					}
+					cfg.TrustedProjectConfigPath = projectPath
+				case statErr != nil && !os.IsNotExist(statErr):
+					return nil, statErr
+				}
+			}
 		}
 	}
 
-	if cwd, err := os.Getwd(); err == nil {
-		projectPath := filepath.Join(cwd, ".grns.toml")
-		if err := loadFile(projectPath, &cfg); err != nil {
-			return nil, err
-		}
-
-		if cfg.DBPath == "" {
+	if cfg.DBPath == "" {
+		if cwd, err := os.Getwd(); err == nil {
 			cfg.DBPath = filepath.Join(cwd, DefaultDBFileName)
 		}
 	}

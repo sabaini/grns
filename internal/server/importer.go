@@ -13,11 +13,11 @@ import (
 
 // Importer executes import requests in explicit phases.
 type Importer struct {
-	store store.TaskStore
+	store store.ImportStore
 }
 
 // NewImporter constructs an Importer.
-func NewImporter(store store.TaskStore) *Importer {
+func NewImporter(store store.ImportStore) *Importer {
 	return &Importer{store: store}
 }
 
@@ -173,7 +173,7 @@ func (i *Importer) applyTaskUpserts(ctx context.Context, run *importRun, mutator
 
 func (i *Importer) overwriteTask(ctx context.Context, mutator store.ImportMutator, rec api.TaskImportRecord) error {
 	update := buildTaskUpdateFromImport(rec)
-	if err := mutator.UpdateTask(ctx, rec.ID, update); err != nil {
+	if err := mutator.UpdateTask(ctx, rec.ID, update.toStoreTaskUpdate()); err != nil {
 		return err
 	}
 	if rec.Labels != nil {
@@ -279,7 +279,7 @@ func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool
 		return rec, true, nil
 	}
 	if !validateID(rec.ID) {
-		return rec, false, fmt.Errorf("invalid id: %s", rec.ID)
+		return rec, false, badRequestCode(fmt.Errorf("invalid id: %s", rec.ID), ErrCodeInvalidID)
 	}
 
 	status, err := normalizeStatus(rec.Status)
@@ -295,12 +295,12 @@ func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool
 	rec.Type = taskType
 
 	if !models.IsValidPriority(rec.Priority) {
-		return rec, false, fmt.Errorf("priority must be between %d and %d", models.PriorityMin, models.PriorityMax)
+		return rec, false, badRequestCode(fmt.Errorf("priority must be between %d and %d", models.PriorityMin, models.PriorityMax), ErrCodeInvalidPriority)
 	}
 
 	rec.ParentID = strings.TrimSpace(rec.ParentID)
 	if rec.ParentID != "" && !validateID(rec.ParentID) {
-		return rec, false, fmt.Errorf("invalid parent_id")
+		return rec, false, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
 	}
 
 	if rec.Labels != nil {
@@ -316,7 +316,7 @@ func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool
 		for _, dep := range rec.Deps {
 			parentID := strings.TrimSpace(dep.ParentID)
 			if parentID == "" || !validateID(parentID) {
-				return rec, false, fmt.Errorf("invalid dependency parent_id")
+				return rec, false, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 			}
 			depType := strings.TrimSpace(dep.Type)
 			if depType == "" {

@@ -6,12 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"grns/internal/api"
-	"grns/internal/store"
 )
+
+type importStreamOptions struct {
+	dedupe         string
+	orphanHandling string
+	dryRun         bool
+	atomic         bool
+}
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if !s.acquireLimiter(s.exportLimiter, w, "export") {
@@ -19,46 +24,24 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.releaseLimiter(s.exportLimiter)
 
-	ctx := r.Context()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 	enc := json.NewEncoder(w)
 
 	offset := 0
 	for {
-		tasks, err := s.store.ListTasks(ctx, store.ListFilter{Limit: exportPageSize, Offset: offset})
+		records, err := s.service.ExportPage(r.Context(), exportPageSize, offset)
 		if err != nil {
-			s.logger.Error("export list tasks", "method", r.Method, "path", r.URL.Path, "offset", offset, "error", err)
+			s.logExportError(r, "page", offset, "", err)
 			return
 		}
-		if len(tasks) == 0 {
+		if len(records) == 0 {
 			return
 		}
 
-		ids := make([]string, 0, len(tasks))
-		for _, t := range tasks {
-			ids = append(ids, t.ID)
-		}
-		labelMap, err := s.store.ListLabelsForTasks(ctx, ids)
-		if err != nil {
-			s.logger.Error("export list labels", "method", r.Method, "path", r.URL.Path, "offset", offset, "error", err)
-			return
-		}
-		depMap, err := s.store.ListDependenciesForTasks(ctx, ids)
-		if err != nil {
-			s.logger.Error("export list dependencies", "method", r.Method, "path", r.URL.Path, "offset", offset, "error", err)
-			return
-		}
-
-		for _, t := range tasks {
-			labels := labelMap[t.ID]
-			if labels == nil {
-				labels = []string{}
-			}
-			deps := depMap[t.ID]
-			record := api.TaskResponse{Task: t, Labels: labels, Deps: deps}
+		for _, record := range records {
 			if err := enc.Encode(record); err != nil {
-				s.logger.Error("export encode", "method", r.Method, "path", r.URL.Path, "task_id", t.ID, "error", err)
+				s.logExportError(r, "encode", offset, record.Task.ID, err)
 				return
 			}
 			if flusher, ok := w.(http.Flusher); ok {
@@ -66,8 +49,16 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		offset += len(tasks)
+		offset += len(records)
 	}
+}
+
+func (s *Server) logExportError(r *http.Request, stage string, offset int, taskID string, err error) {
+	fields := []any{"stage", stage, "method", r.Method, "path", r.URL.Path, "offset", offset, "error", err}
+	if taskID != "" {
+		fields = append(fields, "task_id", taskID)
+	}
+	s.logger.Error("export failed", fields...)
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
@@ -77,34 +68,23 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	defer s.releaseLimiter(s.importLimiter)
 
 	var req api.ImportRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	if !s.decodeJSONReq(w, r, &req) {
+		return
+	}
+
+	if err := validateImportModes(req.Dedupe, req.OrphanHandling); err != nil {
 		s.writeErrorReq(w, r, http.StatusBadRequest, err)
 		return
 	}
 
-	// Validate dedupe.
-	switch req.Dedupe {
-	case "", "skip", "overwrite", "error":
-	default:
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", req.Dedupe))
-		return
-	}
-	// Validate orphan handling.
-	switch req.OrphanHandling {
-	case "", "allow", "skip", "strict":
-	default:
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", req.OrphanHandling))
-		return
-	}
-
 	if len(req.Tasks) == 0 {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("tasks array is required"))
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("tasks array is required"), ErrCodeMissingRequired))
 		return
 	}
 
 	resp, err := s.service.Import(r.Context(), req)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -117,39 +97,9 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.releaseLimiter(s.importLimiter)
 
-	dedupe := strings.TrimSpace(r.URL.Query().Get("dedupe"))
-	orphanHandling := strings.TrimSpace(r.URL.Query().Get("orphan_handling"))
-	dryRunValue := strings.TrimSpace(r.URL.Query().Get("dry_run"))
-	dryRun := false
-	if dryRunValue != "" {
-		parsed, err := strconv.ParseBool(dryRunValue)
-		if err != nil {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid dry_run"))
-			return
-		}
-		dryRun = parsed
-	}
-	atomicValue := strings.TrimSpace(r.URL.Query().Get("atomic"))
-	atomic := false
-	if atomicValue != "" {
-		parsed, err := strconv.ParseBool(atomicValue)
-		if err != nil {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid atomic"))
-			return
-		}
-		atomic = parsed
-	}
-
-	switch dedupe {
-	case "", "skip", "overwrite", "error":
-	default:
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid dedupe mode: %s", dedupe))
-		return
-	}
-	switch orphanHandling {
-	case "", "allow", "skip", "strict":
-	default:
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid orphan_handling: %s", orphanHandling))
+	opts, err := parseImportStreamOptions(r)
+	if err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, err)
 		return
 	}
 
@@ -157,7 +107,7 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 	scanner := bufio.NewScanner(r.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), importStreamMaxLine)
 
-	response := api.ImportResponse{DryRun: dryRun, TaskIDs: []string{}}
+	response := api.ImportResponse{DryRun: opts.dryRun, TaskIDs: []string{}}
 	chunk := make([]api.TaskImportRecord, 0, importStreamChunkSize)
 	lineNum := 0
 	hasRecords := false
@@ -168,10 +118,10 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, err := s.service.Import(r.Context(), api.ImportRequest{
 			Tasks:          chunk,
-			DryRun:         dryRun,
-			Dedupe:         dedupe,
-			OrphanHandling: orphanHandling,
-			Atomic:         atomic,
+			DryRun:         opts.dryRun,
+			Dedupe:         opts.dedupe,
+			OrphanHandling: opts.orphanHandling,
+			Atomic:         opts.atomic,
 		})
 		if err != nil {
 			return err
@@ -200,30 +150,55 @@ func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
 
 		var rec api.TaskImportRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("line %d: %w", lineNum, err))
+			s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("line %d: %w", lineNum, err), ErrCodeInvalidJSON))
 			return
 		}
 		chunk = append(chunk, rec)
 
 		if len(chunk) >= importStreamChunkSize {
 			if err := flushChunk(); err != nil {
-				s.writeErrorReq(w, r, httpStatusFromError(err), err)
+				s.writeServiceError(w, r, err)
 				return
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("reading input: %w", err))
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("reading input: %w", err), ErrCodeInvalidJSON))
 		return
 	}
 	if !hasRecords {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("no records found in input"))
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("no records found in input"), ErrCodeMissingRequired))
 		return
 	}
 	if err := flushChunk(); err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
 	s.writeJSON(w, http.StatusOK, response)
+}
+
+func parseImportStreamOptions(r *http.Request) (importStreamOptions, error) {
+	opts := importStreamOptions{
+		dedupe:         strings.TrimSpace(r.URL.Query().Get("dedupe")),
+		orphanHandling: strings.TrimSpace(r.URL.Query().Get("orphan_handling")),
+	}
+
+	dryRun, err := queryBool(r, "dry_run")
+	if err != nil {
+		return importStreamOptions{}, err
+	}
+	opts.dryRun = dryRun
+
+	atomic, err := queryBool(r, "atomic")
+	if err != nil {
+		return importStreamOptions{}, err
+	}
+	opts.atomic = atomic
+
+	if err := validateImportModes(opts.dedupe, opts.orphanHandling); err != nil {
+		return importStreamOptions{}, err
+	}
+
+	return opts, nil
 }

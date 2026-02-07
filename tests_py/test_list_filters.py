@@ -24,7 +24,7 @@ def test_label_and_filter(seeded_server):
 
     results = json_stdout(run_grns(env, "list", "--label", "bug,auth", "--json"))
     assert len(results) == 1
-    assert results[0]["title"] == "Fix auth bug"
+    assert {r["title"] for r in results} == {"Fix auth bug"}
 
 
 def test_label_any_filter(seeded_server):
@@ -52,14 +52,21 @@ def test_spec_regex_filter(seeded_server):
 def test_limit_and_offset(seeded_server):
     env = seeded_server
 
+    all_results = json_stdout(run_grns(env, "list", "--json"))
+    all_ids = {item["id"] for item in all_results}
+    assert len(all_ids) >= 2
+
     page1 = json_stdout(run_grns(env, "list", "--limit", "1", "--json"))
     assert len(page1) == 1
-    first_title = page1[0]["title"]
-    assert first_title == "Write onboarding docs"
+    page1_id = page1[0]["id"]
 
     page2 = json_stdout(run_grns(env, "list", "--limit", "1", "--offset", "1", "--json"))
     assert len(page2) == 1
-    assert page2[0]["title"] == "Add settings page"
+    page2_id = page2[0]["id"]
+
+    assert page1_id in all_ids
+    assert page2_id in all_ids
+    assert page1_id != page2_id
 
 
 def test_offset_without_limit(seeded_server):

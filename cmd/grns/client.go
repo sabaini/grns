@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -40,33 +41,40 @@ func ensureServer(cfg *config.Config) (func(), error) {
 
 	if err := client.Ping(ctx); err == nil {
 		return nil, nil
+	} else {
+		slog.Debug("api ping failed; attempting auto-spawn", "api_url", cfg.APIURL, "error", err)
 	}
 
 	slog.Debug("auto-spawning server", "api_url", cfg.APIURL, "db", cfg.DBPath)
-	cmd, err := startServerProcess(cfg)
+	cmd, logPath, err := startServerProcess(cfg)
 	if err != nil {
-		return nil, err
+		return nil, &startupDiagnosticsError{apiURL: cfg.APIURL, logPath: logPath, cause: err}
 	}
 
-	if err := waitForServer(client, serverStartTimeout); err != nil {
+	if err := waitForServer(client, cfg.APIURL, serverStartTimeout); err != nil {
+		slog.Error("server auto-spawn failed", "api_url", cfg.APIURL, "error", err, "log_path", logPath)
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return nil, err
+		return nil, &startupDiagnosticsError{apiURL: cfg.APIURL, logPath: logPath, cause: err}
 	}
-	slog.Debug("server ready")
+	slog.Debug("server ready", "api_url", cfg.APIURL)
 
 	cleanup := func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			slog.Debug("failed to kill spawned server", "api_url", cfg.APIURL, "error", err)
+		}
+		if err := cmd.Wait(); err != nil {
+			slog.Debug("spawned server wait returned", "api_url", cfg.APIURL, "error", err)
+		}
 	}
 
 	return cleanup, nil
 }
 
-func startServerProcess(cfg *config.Config) (*exec.Cmd, error) {
+func startServerProcess(cfg *config.Config) (*exec.Cmd, string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	cmd := exec.Command(exe, "srv")
@@ -75,25 +83,31 @@ func startServerProcess(cfg *config.Config) (*exec.Cmd, error) {
 		"GRNS_API_URL="+cfg.APIURL,
 	)
 
+	logPath := ""
 	logFile, err := serverLogFile()
 	if err != nil {
-		slog.Warn("could not create server log file", "error", err)
+		slog.Warn("could not create server log file", "api_url", cfg.APIURL, "error", err)
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 	} else {
-		slog.Debug("server log file", "path", logFile.Name())
+		logPath = logFile.Name()
+		slog.Debug("server log file", "api_url", cfg.APIURL, "path", logPath)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		slog.Error("failed to start server process", "api_url", cfg.APIURL, "db", cfg.DBPath, "error", err)
+		return nil, logPath, err
 	}
-	return cmd, nil
+	slog.Debug("started server process", "api_url", cfg.APIURL, "pid", cmd.Process.Pid)
+	return cmd, logPath, nil
 }
 
-func waitForServer(client *api.Client, timeout time.Duration) error {
+func waitForServer(client *api.Client, apiURL string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
+
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		err := client.Ping(ctx)
@@ -101,13 +115,18 @@ func waitForServer(client *api.Client, timeout time.Duration) error {
 		if err == nil {
 			return nil
 		}
-		if !isConnRefused(err) {
-			// If port is in use but API is not ours, surface the error.
-			return err
+		lastErr = err
+		if !isConnRefused(err) && !isStartupTimeout(err) {
+			slog.Warn("server health check failed with non-transient error", "api_url", apiURL, "error", err)
+			return fmt.Errorf("server health check failed: %w", err)
 		}
 		time.Sleep(serverPollInterval)
 	}
-	return errors.New("server did not start in time")
+
+	if lastErr != nil {
+		return fmt.Errorf("server did not start within %s: last error: %w", timeout, lastErr)
+	}
+	return fmt.Errorf("server did not start within %s", timeout)
 }
 
 func isConnRefused(err error) bool {
@@ -121,6 +140,20 @@ func isConnRefused(err error) bool {
 	var netErr *net.OpError
 	if errors.As(err, &netErr) {
 		return errors.Is(netErr.Err, syscall.ECONNREFUSED)
+	}
+	return false
+}
+
+func isStartupTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
 	}
 	return false
 }

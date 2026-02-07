@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,8 +31,8 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %d", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %d", version)
 	}
 
 	// Verify tasks table exists.
@@ -58,8 +59,8 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %d", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %d", version)
 	}
 }
 
@@ -110,8 +111,8 @@ func TestDetectPreMigrationDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %d", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %d", version)
 	}
 }
 
@@ -125,11 +126,11 @@ func TestMigrationPlan(t *testing.T) {
 	if plan.CurrentVersion != 0 {
 		t.Fatalf("expected current 0, got %d", plan.CurrentVersion)
 	}
-	if plan.AvailableVersion != 3 {
-		t.Fatalf("expected available 3, got %d", plan.AvailableVersion)
+	if plan.AvailableVersion != 4 {
+		t.Fatalf("expected available 4, got %d", plan.AvailableVersion)
 	}
-	if len(plan.Pending) != 3 {
-		t.Fatalf("expected 3 pending, got %d", len(plan.Pending))
+	if len(plan.Pending) != 4 {
+		t.Fatalf("expected 4 pending, got %d", len(plan.Pending))
 	}
 }
 
@@ -145,8 +146,8 @@ func TestMigration002UpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %d", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %d", version)
 	}
 
 	// Verify new columns exist by inserting a row that uses them.
@@ -235,4 +236,63 @@ func TestMigration003FTS5(t *testing.T) {
 	if err == nil {
 		t.Fatal("deleted task should not match in FTS")
 	}
+}
+
+func TestMigration004ListQueryIndexes(t *testing.T) {
+	db := testRawDB(t)
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	t.Run("default list uses updated_at index", func(t *testing.T) {
+		query := `EXPLAIN QUERY PLAN SELECT id, title, status, type, priority, description, spec_id, parent_id, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at, closed_at, custom FROM tasks ORDER BY updated_at DESC LIMIT 20`
+		var planText string
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("explain default list: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatalf("scan explain row: %v", err)
+			}
+			planText += detail + "\n"
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("explain rows: %v", err)
+		}
+		if !containsPlan(planText, "idx_tasks_updated_at_desc") {
+			t.Fatalf("expected default list to use idx_tasks_updated_at_desc, plan:\n%s", planText)
+		}
+	})
+
+	t.Run("type-filter list uses type+updated index", func(t *testing.T) {
+		query := `EXPLAIN QUERY PLAN SELECT id, title, status, type, priority, description, spec_id, parent_id, assignee, notes, design, acceptance_criteria, source_repo, created_at, updated_at, closed_at, custom FROM tasks WHERE type IN ('task') ORDER BY updated_at DESC LIMIT 20`
+		var planText string
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("explain type list: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatalf("scan explain row: %v", err)
+			}
+			planText += detail + "\n"
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("explain rows: %v", err)
+		}
+		if !containsPlan(planText, "idx_tasks_type_updated_desc") {
+			t.Fatalf("expected type-filter list to use idx_tasks_type_updated_desc, plan:\n%s", planText)
+		}
+	})
+}
+
+func containsPlan(plan, needle string) bool {
+	return strings.Contains(plan, needle)
 }

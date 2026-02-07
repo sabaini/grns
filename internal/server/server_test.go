@@ -1,9 +1,12 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"grns/internal/api"
 )
 
 func TestListenAddrRemoteGuard(t *testing.T) {
@@ -54,6 +57,13 @@ func TestWithAuth(t *testing.T) {
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d", w.Code)
 		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.ErrorCode != ErrCodeUnauthorized {
+			t.Fatalf("expected error_code %d, got %d", ErrCodeUnauthorized, errResp.ErrorCode)
+		}
 		if nextCalled {
 			t.Fatal("next handler should not be called")
 		}
@@ -94,6 +104,13 @@ func TestWithAuth(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d", w.Code)
 		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.ErrorCode != ErrCodeForbidden {
+			t.Fatalf("expected error_code %d, got %d", ErrCodeForbidden, errResp.ErrorCode)
+		}
 
 		req = httptest.NewRequest(http.MethodPost, "/v1/admin/cleanup", nil)
 		req.Header.Set("Authorization", "Bearer token")
@@ -117,6 +134,13 @@ func TestWithAuth(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d", w.Code)
+		}
+		var errResp api.ErrorResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if errResp.ErrorCode != ErrCodeForbidden {
+			t.Fatalf("expected error_code %d, got %d", ErrCodeForbidden, errResp.ErrorCode)
 		}
 
 		req = httptest.NewRequest(http.MethodPost, "/v1/admin/cleanup", nil)

@@ -7,9 +7,8 @@ load 'helpers.bash'
   count="$(printf '%s' "$output" | json_array_len)"
   [ "$count" -eq 2 ]
 
-  titles="$(printf '%s' "$output" | json_array_field title)"
-  echo "$titles" | grep -q "Write introduction"
-  echo "$titles" | grep -q "Add usage examples"
+  titles_sorted="$(printf '%s' "$output" | json_array_field_sorted title)"
+  [ "$titles_sorted" = $'Add usage examples\nWrite introduction' ]
 
   OUTPUT="$output" python3 - <<'PY'
 import json

@@ -10,23 +10,22 @@ import (
 
 func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 	var req api.CleanupRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	if !s.decodeJSONReq(w, r, &req) {
 		return
 	}
 	if req.OlderThanDays <= 0 {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("older_than_days must be > 0"))
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("older_than_days must be > 0"), ErrCodeInvalidQuery))
 		return
 	}
 	if !req.DryRun && r.Header.Get("X-Confirm") != "true" {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("non-dry-run requires X-Confirm: true header"))
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("non-dry-run requires X-Confirm: true header"), ErrCodeMissingRequired))
 		return
 	}
 
 	cutoff := time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
 	result, err := s.store.CleanupClosedTasks(r.Context(), cutoff, req.DryRun)
 	if err != nil {
-		s.writeErrorReq(w, r, http.StatusInternalServerError, err)
+		s.writeStoreError(w, r, err)
 		return
 	}
 

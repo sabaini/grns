@@ -16,20 +16,22 @@ func newDepCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		Use:   "dep",
 		Short: "Manage dependencies",
 	}
+	depCmd.AddCommand(
+		newDepAddCmd(cfg, jsonOutput),
+		newDepTreeCmd(cfg, jsonOutput),
+	)
+	return depCmd
+}
 
-	addCmd := &cobra.Command{
+func newDepAddCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "add <child> <parent>",
 		Short: "Add a dependency",
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 2 {
-				return errors.New("child and parent ids are required")
-			}
-			return nil
-		},
+		Args:  requireAtLeastArgs(2, "child and parent ids are required"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			depType, _ := cmd.Flags().GetString("type")
 			if depType == "" {
-				depType = "blocks"
+				depType = string(models.DependencyBlocks)
 			}
 			return withClient(cfg, func(client *api.Client) error {
 				resp, err := client.AddDependency(cmd.Context(), api.DepCreateRequest{
@@ -47,17 +49,15 @@ func newDepCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 			})
 		},
 	}
-	addCmd.Flags().String("type", "", "dependency type")
+	cmd.Flags().String("type", "", "dependency type")
+	return cmd
+}
 
-	treeCmd := &cobra.Command{
+func newDepTreeCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
+	return &cobra.Command{
 		Use:   "tree <id>",
 		Short: "Show full dependency tree for a task",
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 1 {
-				return errors.New("task id is required")
-			}
-			return nil
-		},
+		Args:  requireAtLeastArgs(1, "task id is required"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cfg, func(client *api.Client) error {
 				resp, err := client.DependencyTree(cmd.Context(), args[0])
@@ -67,24 +67,27 @@ func newDepCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if *jsonOutput {
 					return writeJSON(resp)
 				}
-				if len(resp.Nodes) == 0 {
-					return writePlain("No dependencies for %s\n", args[0])
-				}
-				for _, node := range resp.Nodes {
-					indent := strings.Repeat("  ", node.Depth)
-					arrow := "^"
-					if node.Direction == "downstream" {
-						arrow = "v"
-					}
-					_ = writePlain("%s%s %s [%s] %s (%s)\n", indent, arrow, node.ID, node.Status, node.Title, node.DepType)
-				}
-				return nil
+				return writeDependencyTree(args[0], resp.Nodes)
 			})
 		},
 	}
+}
 
-	depCmd.AddCommand(addCmd, treeCmd)
-	return depCmd
+func writeDependencyTree(rootID string, nodes []models.DepTreeNode) error {
+	if len(nodes) == 0 {
+		return writePlain("No dependencies for %s\n", rootID)
+	}
+	for _, node := range nodes {
+		indent := strings.Repeat("  ", node.Depth)
+		arrow := "^"
+		if node.Direction == "downstream" {
+			arrow = "v"
+		}
+		if err := writePlain("%s%s %s [%s] %s (%s)\n", indent, arrow, node.ID, node.Status, node.Title, node.DepType); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parseDeps(value string) ([]models.Dependency, error) {
@@ -97,7 +100,7 @@ func parseDeps(value string) ([]models.Dependency, error) {
 		}
 		parts := strings.SplitN(item, ":", 2)
 		if len(parts) == 1 {
-			deps = append(deps, models.Dependency{ParentID: parts[0], Type: "blocks"})
+			deps = append(deps, models.Dependency{ParentID: parts[0], Type: string(models.DependencyBlocks)})
 			continue
 		}
 		depType := strings.TrimSpace(parts[0])

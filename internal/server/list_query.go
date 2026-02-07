@@ -9,20 +9,19 @@ import (
 	"time"
 
 	"grns/internal/models"
-	"grns/internal/store"
 )
 
-func parseListFilter(r *http.Request) (store.ListFilter, error) {
+func parseListFilter(r *http.Request) (taskListFilter, error) {
 	limit, err := queryInt(r, "limit")
 	if err != nil {
-		return store.ListFilter{}, err
+		return taskListFilter{}, err
 	}
 	offset, err := queryInt(r, "offset")
 	if err != nil {
-		return store.ListFilter{}, err
+		return taskListFilter{}, err
 	}
 
-	filter := store.ListFilter{
+	filter := taskListFilter{
 		Statuses:  splitCSV(r.URL.Query().Get("status")),
 		Types:     splitCSV(r.URL.Query().Get("type")),
 		ParentID:  strings.TrimSpace(r.URL.Query().Get("parent_id")),
@@ -33,7 +32,7 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 	}
 
 	if filter.ParentID != "" && !validateID(filter.ParentID) {
-		return store.ListFilter{}, fmt.Errorf("invalid parent_id")
+		return taskListFilter{}, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
 	}
 
 	if len(filter.Statuses) > 0 {
@@ -41,7 +40,7 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 		for _, status := range filter.Statuses {
 			value, err := normalizeStatus(status)
 			if err != nil {
-				return store.ListFilter{}, err
+				return taskListFilter{}, err
 			}
 			statuses = append(statuses, value)
 		}
@@ -53,7 +52,7 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 		for _, taskType := range filter.Types {
 			value, err := normalizeType(taskType)
 			if err != nil {
-				return store.ListFilter{}, err
+				return taskListFilter{}, err
 			}
 			types = append(types, value)
 		}
@@ -63,39 +62,39 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 	if len(filter.Labels) > 0 {
 		labels, err := normalizeLabels(filter.Labels)
 		if err != nil {
-			return store.ListFilter{}, err
+			return taskListFilter{}, err
 		}
 		filter.Labels = labels
 	}
 	if len(filter.LabelsAny) > 0 {
 		labels, err := normalizeLabels(filter.LabelsAny)
 		if err != nil {
-			return store.ListFilter{}, err
+			return taskListFilter{}, err
 		}
 		filter.LabelsAny = labels
 	}
 
 	priority, err := parsePriorityQuery(r.URL.Query().Get("priority"), "priority")
 	if err != nil {
-		return store.ListFilter{}, err
+		return taskListFilter{}, err
 	}
 	filter.Priority = priority
 
 	priorityMin, err := parsePriorityQuery(r.URL.Query().Get("priority_min"), "priority_min")
 	if err != nil {
-		return store.ListFilter{}, err
+		return taskListFilter{}, err
 	}
 	filter.PriorityMin = priorityMin
 
 	priorityMax, err := parsePriorityQuery(r.URL.Query().Get("priority_max"), "priority_max")
 	if err != nil {
-		return store.ListFilter{}, err
+		return taskListFilter{}, err
 	}
 	filter.PriorityMax = priorityMax
 
 	if filter.PriorityMin != nil && filter.PriorityMax != nil {
 		if *filter.PriorityMin > *filter.PriorityMax {
-			return store.ListFilter{}, fmt.Errorf("priority_min cannot be greater than priority_max")
+			return taskListFilter{}, badRequestCode(fmt.Errorf("priority_min cannot be greater than priority_max"), ErrCodeInvalidPriority)
 		}
 	}
 
@@ -120,37 +119,37 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 
 	createdAfter, err := parseTimeFilter(r, "created_after")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid created_after: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid created_after: %w", err)
 	}
 	filter.CreatedAfter = createdAfter
 
 	createdBefore, err := parseTimeFilter(r, "created_before")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid created_before: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid created_before: %w", err)
 	}
 	filter.CreatedBefore = createdBefore
 
 	updatedAfter, err := parseTimeFilter(r, "updated_after")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid updated_after: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid updated_after: %w", err)
 	}
 	filter.UpdatedAfter = updatedAfter
 
 	updatedBefore, err := parseTimeFilter(r, "updated_before")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid updated_before: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid updated_before: %w", err)
 	}
 	filter.UpdatedBefore = updatedBefore
 
 	closedAfter, err := parseTimeFilter(r, "closed_after")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid closed_after: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid closed_after: %w", err)
 	}
 	filter.ClosedAfter = closedAfter
 
 	closedBefore, err := parseTimeFilter(r, "closed_before")
 	if err != nil {
-		return store.ListFilter{}, fmt.Errorf("invalid closed_before: %w", err)
+		return taskListFilter{}, fmt.Errorf("invalid closed_before: %w", err)
 	}
 	filter.ClosedBefore = closedBefore
 
@@ -168,7 +167,7 @@ func parseListFilter(r *http.Request) (store.ListFilter, error) {
 	if spec != "" {
 		pattern := "(?i)" + spec
 		if _, err := regexp.Compile(pattern); err != nil {
-			return store.ListFilter{}, fmt.Errorf("invalid spec regex")
+			return taskListFilter{}, badRequestCode(fmt.Errorf("invalid spec regex"), ErrCodeInvalidQuery)
 		}
 		filter.SpecRegex = pattern
 	}
@@ -183,10 +182,10 @@ func parsePriorityQuery(raw, key string) (*int, error) {
 
 	value, err := strconv.Atoi(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s", key)
+		return nil, badRequestCode(fmt.Errorf("invalid %s", key), ErrCodeInvalidPriority)
 	}
 	if !models.IsValidPriority(value) {
-		return nil, fmt.Errorf("%s must be between %d and %d", key, models.PriorityMin, models.PriorityMax)
+		return nil, badRequestCode(fmt.Errorf("%s must be between %d and %d", key, models.PriorityMin, models.PriorityMax), ErrCodeInvalidPriority)
 	}
 
 	return &value, nil

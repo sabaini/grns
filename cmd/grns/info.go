@@ -19,24 +19,47 @@ func newInfoCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				resp.DBPath = cfg.DBPath
 
-				if *jsonOutput {
-					return writeJSON(resp)
+				output := struct {
+					DBPath        string         `json:"db_path"`
+					ProjectPrefix string         `json:"project_prefix"`
+					SchemaVersion int            `json:"schema_version"`
+					TaskCounts    map[string]int `json:"task_counts"`
+					TotalTasks    int            `json:"total_tasks"`
+				}{
+					DBPath:        cfg.DBPath,
+					ProjectPrefix: resp.ProjectPrefix,
+					SchemaVersion: resp.SchemaVersion,
+					TaskCounts:    resp.TaskCounts,
+					TotalTasks:    resp.TotalTasks,
 				}
 
-				_ = writePlain("db_path: %s\n", resp.DBPath)
-				_ = writePlain("project_prefix: %s\n", resp.ProjectPrefix)
-				_ = writePlain("schema_version: %d\n", resp.SchemaVersion)
-				_ = writePlain("total_tasks: %d\n", resp.TotalTasks)
+				if *jsonOutput {
+					return writeJSON(output)
+				}
 
-				statuses := make([]string, 0, len(resp.TaskCounts))
-				for status := range resp.TaskCounts {
+				if err := writePlain("db_path: %s\n", output.DBPath); err != nil {
+					return err
+				}
+				if err := writePlain("project_prefix: %s\n", output.ProjectPrefix); err != nil {
+					return err
+				}
+				if err := writePlain("schema_version: %d\n", output.SchemaVersion); err != nil {
+					return err
+				}
+				if err := writePlain("total_tasks: %d\n", output.TotalTasks); err != nil {
+					return err
+				}
+
+				statuses := make([]string, 0, len(output.TaskCounts))
+				for status := range output.TaskCounts {
 					statuses = append(statuses, status)
 				}
 				sort.Strings(statuses)
 				for _, status := range statuses {
-					_ = writePlain("  %s: %d\n", status, resp.TaskCounts[status])
+					if err := writePlain("  %s: %d\n", status, output.TaskCounts[status]); err != nil {
+						return err
+					}
 				}
 				return nil
 			})

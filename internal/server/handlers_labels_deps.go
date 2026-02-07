@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,16 +8,29 @@ import (
 	"grns/internal/models"
 )
 
+func (s *Server) taskLabelsRequest(w http.ResponseWriter, r *http.Request) (string, []string, bool) {
+	id, ok := s.pathIDOrBadRequest(w, r)
+	if !ok {
+		return "", nil, false
+	}
+
+	var req api.LabelsRequest
+	if !s.decodeJSONReq(w, r, &req) {
+		return "", nil, false
+	}
+
+	return id, req.Labels, true
+}
+
 func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, ok := s.pathIDOrBadRequest(w, r)
+	if !ok {
 		return
 	}
 
 	nodes, err := s.store.DependencyTree(r.Context(), id)
 	if err != nil {
-		s.writeErrorReq(w, r, http.StatusInternalServerError, err)
+		s.writeStoreError(w, r, err)
 		return
 	}
 	if nodes == nil {
@@ -33,8 +45,7 @@ func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 	var req api.DepCreateRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+	if !s.decodeJSONReq(w, r, &req) {
 		return
 	}
 
@@ -46,7 +57,7 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.service.AddDependency(r.Context(), childID, parentID, depType); err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -56,7 +67,7 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 	labels, err := s.store.ListAllLabels(r.Context())
 	if err != nil {
-		s.writeErrorReq(w, r, http.StatusInternalServerError, err)
+		s.writeStoreError(w, r, err)
 		return
 	}
 
@@ -64,15 +75,14 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, ok := s.pathIDOrBadRequest(w, r)
+	if !ok {
 		return
 	}
 
 	labels, err := s.store.ListLabels(r.Context(), id)
 	if err != nil {
-		s.writeErrorReq(w, r, http.StatusInternalServerError, err)
+		s.writeStoreError(w, r, err)
 		return
 	}
 
@@ -80,20 +90,14 @@ func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, labelsReq, ok := s.taskLabelsRequest(w, r)
+	if !ok {
 		return
 	}
 
-	var req api.LabelsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
-		return
-	}
-	labels, err := s.service.AddLabels(r.Context(), id, req.Labels)
+	labels, err := s.service.AddLabels(r.Context(), id, labelsReq)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 
@@ -101,20 +105,14 @@ func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !validateID(id) {
-		s.writeErrorReq(w, r, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	id, labelsReq, ok := s.taskLabelsRequest(w, r)
+	if !ok {
 		return
 	}
 
-	var req api.LabelsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.writeErrorReq(w, r, http.StatusBadRequest, err)
-		return
-	}
-	labels, err := s.service.RemoveLabels(r.Context(), id, req.Labels)
+	labels, err := s.service.RemoveLabels(r.Context(), id, labelsReq)
 	if err != nil {
-		s.writeErrorReq(w, r, httpStatusFromError(err), err)
+		s.writeServiceError(w, r, err)
 		return
 	}
 

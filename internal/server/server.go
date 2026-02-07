@@ -118,9 +118,10 @@ func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, na
 		return true
 	default:
 		s.writeError(w, http.StatusTooManyRequests, apiError{
-			status: http.StatusTooManyRequests,
-			code:   "resource_exhausted",
-			err:    fmt.Errorf("too many concurrent %s requests", name),
+			status:  http.StatusTooManyRequests,
+			code:    "resource_exhausted",
+			errCode: ErrCodeResourceExhausted,
+			err:     fmt.Errorf("too many concurrent %s requests", name),
 		})
 		return false
 	}
