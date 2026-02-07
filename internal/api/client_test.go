@@ -160,3 +160,81 @@ func TestClientDecodeStructuredErrorCode(t *testing.T) {
 		t.Fatalf("unexpected status: %d", apiErr.Status)
 	}
 }
+
+func TestClientAttachmentMethods(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks/gr-aa11/attachments":
+			if err := r.ParseMultipartForm(2 << 20); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"bad multipart"}`))
+				return
+			}
+			if got := r.FormValue("kind"); got != "artifact" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"missing kind"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"at-a110","task_id":"gr-aa11","kind":"artifact","source_type":"managed_blob","blob_id":"bl-b001"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks/gr-aa11/attachments/link":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/tasks/gr-aa11/attachments":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[ {"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"} ]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/attachments/at-a111":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/attachments/at-a111":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"at-a111"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+		}
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+
+	managed, err := client.CreateTaskAttachment(context.Background(), "gr-aa11", AttachmentUploadRequest{Kind: "artifact", Filename: "a.txt"}, strings.NewReader("hello"))
+	if err != nil {
+		t.Fatalf("CreateTaskAttachment: %v", err)
+	}
+	if managed.ID != "at-a110" {
+		t.Fatalf("unexpected managed attachment id: %q", managed.ID)
+	}
+
+	created, err := client.CreateTaskAttachmentLink(context.Background(), "gr-aa11", AttachmentCreateLinkRequest{Kind: "artifact", ExternalURL: "https://example.com/a"})
+	if err != nil {
+		t.Fatalf("CreateTaskAttachmentLink: %v", err)
+	}
+	if created.ID != "at-a111" {
+		t.Fatalf("unexpected attachment id: %q", created.ID)
+	}
+
+	list, err := client.ListTaskAttachments(context.Background(), "gr-aa11")
+	if err != nil {
+		t.Fatalf("ListTaskAttachments: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "at-a111" {
+		t.Fatalf("unexpected attachment list: %#v", list)
+	}
+
+	got, err := client.GetAttachment(context.Background(), "at-a111")
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+	if got.ID != "at-a111" {
+		t.Fatalf("unexpected attachment: %#v", got)
+	}
+
+	deleted, err := client.DeleteAttachment(context.Background(), "at-a111")
+	if err != nil {
+		t.Fatalf("DeleteAttachment: %v", err)
+	}
+	if deleted["id"] != "at-a111" {
+		t.Fatalf("unexpected delete response: %#v", deleted)
+	}
+}

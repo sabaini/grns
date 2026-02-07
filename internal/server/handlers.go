@@ -122,6 +122,10 @@ func internalError(err error) error {
 	return makeAPIError(http.StatusInternalServerError, "internal", ErrCodeInternal, err)
 }
 
+func notImplemented(err error) error {
+	return makeAPIError(http.StatusNotImplemented, "not_implemented", ErrCodeNotImplemented, err)
+}
+
 func storeFailure(err error) error {
 	return makeAPIError(http.StatusInternalServerError, "internal", ErrCodeStoreFailure, err)
 }
@@ -154,6 +158,8 @@ func errorCode(status int, err error) string {
 		return "resource_exhausted"
 	case http.StatusInternalServerError:
 		return "internal"
+	case http.StatusNotImplemented:
+		return "not_implemented"
 	default:
 		return ""
 	}

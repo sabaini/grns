@@ -171,6 +171,8 @@ func TestLoadConfigDirOverride(t *testing.T) {
 	}
 
 	t.Setenv("GRNS_CONFIG_DIR", configDir)
+	t.Setenv("GRNS_DB", "")
+	t.Setenv("GRNS_API_URL", "")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)

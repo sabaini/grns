@@ -6,6 +6,7 @@ Grns is a lightweight issue tracker and memory system for agents, focused on dur
 Related design docs:
 - [Attachments Design](attachments.md)
 - [Messaging Design](messaging.md)
+- [Task ↔ Git References Design](git-refs.md)
 
 ## Problem Statement
 We need a fast, CLI-oriented task tracker that supports dependency modeling and recency queries while remaining simple enough for local use, yet extensible enough for multi-user collaboration.

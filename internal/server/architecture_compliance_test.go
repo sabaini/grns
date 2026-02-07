@@ -19,8 +19,9 @@ type registeredRoute struct {
 }
 
 type boundaryCalls struct {
-	service []string
-	store   []string
+	service           []string
+	attachmentService []string
+	store             []string
 }
 
 func TestMutationRoutesUseServiceBoundary(t *testing.T) {
@@ -50,8 +51,8 @@ func TestMutationRoutesUseServiceBoundary(t *testing.T) {
 		if len(calls.store) > 0 {
 			t.Fatalf("handler %q (%s %s) calls s.store directly: %v", route.handler, route.method, route.path, calls.store)
 		}
-		if len(calls.service) == 0 {
-			t.Fatalf("handler %q (%s %s) does not call s.service", route.handler, route.method, route.path)
+		if len(calls.service) == 0 && len(calls.attachmentService) == 0 {
+			t.Fatalf("handler %q (%s %s) does not call a service boundary", route.handler, route.method, route.path)
 		}
 	}
 }
@@ -165,12 +166,15 @@ func inspectBoundaryCalls(fn *ast.FuncDecl) boundaryCalls {
 		switch chain.Sel.Name {
 		case "service":
 			calls.service = append(calls.service, selector.Sel.Name)
+		case "attachmentService":
+			calls.attachmentService = append(calls.attachmentService, selector.Sel.Name)
 		case "store":
 			calls.store = append(calls.store, selector.Sel.Name)
 		}
 		return true
 	})
 	calls.service = uniqueSorted(calls.service)
+	calls.attachmentService = uniqueSorted(calls.attachmentService)
 	calls.store = uniqueSorted(calls.store)
 	return calls
 }

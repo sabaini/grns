@@ -31,8 +31,8 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %d", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %d", version)
 	}
 
 	// Verify tasks table exists.
@@ -59,8 +59,8 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %d", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %d", version)
 	}
 }
 
@@ -111,8 +111,8 @@ func TestDetectPreMigrationDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %d", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %d", version)
 	}
 }
 
@@ -126,18 +126,18 @@ func TestMigrationPlan(t *testing.T) {
 	if plan.CurrentVersion != 0 {
 		t.Fatalf("expected current 0, got %d", plan.CurrentVersion)
 	}
-	if plan.AvailableVersion != 4 {
-		t.Fatalf("expected available 4, got %d", plan.AvailableVersion)
+	if plan.AvailableVersion != 5 {
+		t.Fatalf("expected available 5, got %d", plan.AvailableVersion)
 	}
-	if len(plan.Pending) != 4 {
-		t.Fatalf("expected 4 pending, got %d", len(plan.Pending))
+	if len(plan.Pending) != 5 {
+		t.Fatalf("expected 5 pending, got %d", len(plan.Pending))
 	}
 }
 
 func TestMigration002UpgradePath(t *testing.T) {
 	db := testRawDB(t)
 
-	// Apply only migration 1 by running and then verifying.
+	// Apply all migrations and verify migration 2 additions still exist.
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
@@ -146,8 +146,8 @@ func TestMigration002UpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %d", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %d", version)
 	}
 
 	// Verify new columns exist by inserting a row that uses them.
@@ -291,6 +291,50 @@ func TestMigration004ListQueryIndexes(t *testing.T) {
 			t.Fatalf("expected type-filter list to use idx_tasks_type_updated_desc, plan:\n%s", planText)
 		}
 	})
+}
+
+func TestMigration005AttachmentsSchema(t *testing.T) {
+	db := testRawDB(t)
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	for _, table := range []string{"blobs", "attachments", "attachment_labels"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count); err != nil {
+			t.Fatalf("check table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	for _, index := range []string{"idx_attachments_media_type", "idx_attachment_labels_label"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", index).Scan(&count); err != nil {
+			t.Fatalf("check index %s: %v", index, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected index %s to exist", index)
+		}
+	}
+
+	taskInsert := `INSERT INTO tasks (id, title, status, type, priority, created_at, updated_at) VALUES ('at-t001', 'Task', 'open', 'task', 2, datetime('now'), datetime('now'))`
+	if _, err := db.Exec(taskInsert); err != nil {
+		t.Fatalf("insert task for attachment checks: %v", err)
+	}
+
+	blobInsert := `INSERT INTO blobs (id, sha256, size_bytes, storage_backend, blob_key, created_at) VALUES ('bl-0001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 10, 'local_cas', 'sha256/aa/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', datetime('now'))`
+	if _, err := db.Exec(blobInsert); err != nil {
+		t.Fatalf("insert blob for attachment checks: %v", err)
+	}
+
+	// Invalid media_type_source should violate CHECK constraint.
+	invalidAttachment := `INSERT INTO attachments (id, task_id, kind, source_type, blob_id, media_type_source, created_at, updated_at)
+		VALUES ('at-0001', 'at-t001', 'artifact', 'managed_blob', 'bl-0001', 'invalid_source', datetime('now'), datetime('now'))`
+	if _, err := db.Exec(invalidAttachment); err == nil {
+		t.Fatal("expected invalid media_type_source to fail CHECK constraint")
+	}
 }
 
 func containsPlan(plan, needle string) bool {

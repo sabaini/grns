@@ -125,6 +125,64 @@ CREATE INDEX IF NOT EXISTS idx_tasks_type_updated_desc ON tasks(type, updated_at
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee_updated_desc ON tasks(assignee, updated_at DESC);
 `,
 	},
+	{
+		Version:     5,
+		Description: "attachments: add blobs, attachments, and attachment_labels tables with constraints and indexes",
+		SQL: `
+CREATE TABLE IF NOT EXISTS blobs (
+  id TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL UNIQUE,
+  size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+  storage_backend TEXT NOT NULL,
+  blob_key TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  title TEXT,
+  filename TEXT,
+  media_type TEXT,
+  media_type_source TEXT NOT NULL DEFAULT 'unknown',
+  blob_id TEXT,
+  external_url TEXT,
+  repo_path TEXT,
+  meta_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (blob_id) REFERENCES blobs(id) ON DELETE RESTRICT,
+  CHECK (kind IN ('spec', 'diagram', 'artifact', 'diagnostic', 'archive', 'other')),
+  CHECK (source_type IN ('managed_blob', 'external_url', 'repo_path')),
+  CHECK (media_type_source IN ('sniffed', 'declared', 'inferred', 'unknown')),
+  CHECK (
+    (source_type = 'managed_blob' AND blob_id IS NOT NULL AND external_url IS NULL AND repo_path IS NULL) OR
+    (source_type = 'external_url' AND blob_id IS NULL AND external_url IS NOT NULL AND repo_path IS NULL) OR
+    (source_type = 'repo_path' AND blob_id IS NULL AND external_url IS NULL AND repo_path IS NOT NULL)
+  ),
+  CHECK (expires_at IS NULL OR expires_at >= created_at)
+);
+
+CREATE TABLE IF NOT EXISTS attachment_labels (
+  attachment_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  PRIMARY KEY (attachment_id, label),
+  FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_task_created ON attachments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_kind ON attachments(kind);
+CREATE INDEX IF NOT EXISTS idx_attachments_media_type ON attachments(media_type);
+CREATE INDEX IF NOT EXISTS idx_attachments_source_type ON attachments(source_type);
+CREATE INDEX IF NOT EXISTS idx_attachments_blob_id ON attachments(blob_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_expires_at ON attachments(expires_at);
+CREATE INDEX IF NOT EXISTS idx_attachment_labels_label ON attachment_labels(label);
+`,
+	},
 }
 
 const migrationsTableSQL = `

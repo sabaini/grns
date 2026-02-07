@@ -14,17 +14,18 @@ This doc is a follow-up to [Attachments Design](attachments.md) and focuses on c
 1. Keep task query performance unchanged.
 2. Keep managed blob bytes out of SQLite rows.
 3. Enforce source-shape validity at DB level where practical.
-4. Keep migration additive and backward-compatible.
-5. Allow orphan-blob recovery by GC after partial failures.
+4. Separate technical type (`media_type`) from workflow intent (`kind` + labels).
+5. Keep migration additive and backward-compatible.
+6. Allow orphan-blob recovery by GC after partial failures.
 
 ---
 
-## Proposed migration (v4)
+## Proposed migration (v5)
 
 Append a new migration in `internal/store/migrations.go`:
 
-- **Version:** `4`
-- **Description:** `attachments: add blobs and attachments tables with constraints and indexes`
+- **Version:** `5` (next after current v4)
+- **Description:** `attachments: add blobs, attachments, and attachment_labels tables with constraints and indexes`
 
 ### SQL (proposed)
 ```sql
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   title TEXT,
   filename TEXT,
   media_type TEXT,
+  media_type_source TEXT NOT NULL DEFAULT 'unknown',
 
   -- source payload (exactly one source pattern enforced below)
   blob_id TEXT,
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 
   CHECK (kind IN ('spec', 'diagram', 'artifact', 'diagnostic', 'archive', 'other')),
   CHECK (source_type IN ('managed_blob', 'external_url', 'repo_path')),
+  CHECK (media_type_source IN ('sniffed', 'declared', 'inferred', 'unknown')),
 
   CHECK (
     (source_type = 'managed_blob' AND blob_id IS NOT NULL AND external_url IS NULL AND repo_path IS NULL) OR
@@ -73,11 +76,21 @@ CREATE TABLE IF NOT EXISTS attachments (
   CHECK (expires_at IS NULL OR expires_at >= created_at)
 );
 
+CREATE TABLE IF NOT EXISTS attachment_labels (
+  attachment_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  PRIMARY KEY (attachment_id, label),
+  FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_attachments_task_created
   ON attachments(task_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_attachments_kind
   ON attachments(kind);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_media_type
+  ON attachments(media_type);
 
 CREATE INDEX IF NOT EXISTS idx_attachments_source_type
   ON attachments(source_type);
@@ -87,10 +100,15 @@ CREATE INDEX IF NOT EXISTS idx_attachments_blob_id
 
 CREATE INDEX IF NOT EXISTS idx_attachments_expires_at
   ON attachments(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_attachment_labels_label
+  ON attachment_labels(label);
 ```
 
 ### Notes on constraints
 - DB constraints protect against malformed mixed-source rows.
+- `kind` stays intentionally coarse; labels carry project-specific workflow tags.
+- `media_type_source` preserves provenance of MIME classification decisions.
 - `ON DELETE RESTRICT` for `blob_id` prevents accidental blob metadata deletion while referenced.
 - GC should delete unreferenced blobs explicitly.
 
@@ -111,6 +129,84 @@ CREATE INDEX IF NOT EXISTS idx_attachments_expires_at
 - Lowercase hex digest, 64 chars.
 - Service validation should enforce this shape before insert.
 
+### Concrete model structs (proposed)
+
+`internal/models/attachment.go`:
+
+```go
+package models
+
+import "time"
+
+type AttachmentKind string
+
+const (
+	AttachmentKindSpec       AttachmentKind = "spec"
+	AttachmentKindDiagram    AttachmentKind = "diagram"
+	AttachmentKindArtifact   AttachmentKind = "artifact"
+	AttachmentKindDiagnostic AttachmentKind = "diagnostic"
+	AttachmentKindArchive    AttachmentKind = "archive"
+	AttachmentKindOther      AttachmentKind = "other"
+)
+
+type AttachmentSourceType string
+
+const (
+	AttachmentSourceManagedBlob AttachmentSourceType = "managed_blob"
+	AttachmentSourceExternalURL AttachmentSourceType = "external_url"
+	AttachmentSourceRepoPath    AttachmentSourceType = "repo_path"
+)
+
+type AttachmentMediaTypeSource string
+
+const (
+	MediaTypeSourceSniffed  AttachmentMediaTypeSource = "sniffed"
+	MediaTypeSourceDeclared AttachmentMediaTypeSource = "declared"
+	MediaTypeSourceInferred AttachmentMediaTypeSource = "inferred"
+	MediaTypeSourceUnknown  AttachmentMediaTypeSource = "unknown"
+)
+
+type Attachment struct {
+	ID              string                    `json:"id"`
+	TaskID          string                    `json:"task_id"`
+	Kind            string                    `json:"kind"`
+	SourceType      string                    `json:"source_type"`
+	Title           string                    `json:"title,omitempty"`
+	Filename        string                    `json:"filename,omitempty"`
+	MediaType       string                    `json:"media_type,omitempty"`
+	MediaTypeSource string                    `json:"media_type_source,omitempty"`
+	BlobID          string                    `json:"blob_id,omitempty"`
+	ExternalURL     string                    `json:"external_url,omitempty"`
+	RepoPath        string                    `json:"repo_path,omitempty"`
+	Meta            map[string]any            `json:"meta,omitempty"`
+	Labels          []string                  `json:"labels,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	ExpiresAt       *time.Time                `json:"expires_at,omitempty"`
+}
+```
+
+`internal/models/blob.go`:
+
+```go
+package models
+
+import "time"
+
+type Blob struct {
+	ID             string    `json:"id"`
+	SHA256         string    `json:"sha256"`
+	SizeBytes      int64     `json:"size_bytes"`
+	StorageBackend string    `json:"storage_backend"`
+	BlobKey        string    `json:"blob_key"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+```
+
+Notes:
+- Keep `Kind`, `SourceType`, `MediaTypeSource` as string-backed enums to align with existing model style.
+- `Labels` is API-facing convenience; persist in `attachment_labels` join table.
+
 ---
 
 ## Storage key conventions
@@ -127,7 +223,76 @@ Rationale:
 - Avoid embedding machine-specific absolute paths in DB.
 - Backend portability for future remote stores.
 
+### MIME handling policy (MVP)
+- Managed uploads: detect MIME from bytes and store normalized lowercase `media_type`.
+- Declared `media_type` from clients is optional and may be rejected when mismatched with detected type.
+- Link/path attachments may provide `media_type`; otherwise keep null or inferred best-effort.
+- Track provenance via `media_type_source` (`sniffed`, `declared`, `inferred`, `unknown`).
+
 ---
+
+### Concrete `migrations.go` snippet (copy/adapt)
+
+```go
+{
+	Version:     5,
+	Description: "attachments: add blobs, attachments, and attachment_labels tables with constraints and indexes",
+	SQL: `
+CREATE TABLE IF NOT EXISTS blobs (
+  id TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL UNIQUE,
+  size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+  storage_backend TEXT NOT NULL,
+  blob_key TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  title TEXT,
+  filename TEXT,
+  media_type TEXT,
+  media_type_source TEXT NOT NULL DEFAULT 'unknown',
+  blob_id TEXT,
+  external_url TEXT,
+  repo_path TEXT,
+  meta_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (blob_id) REFERENCES blobs(id) ON DELETE RESTRICT,
+  CHECK (kind IN ('spec', 'diagram', 'artifact', 'diagnostic', 'archive', 'other')),
+  CHECK (source_type IN ('managed_blob', 'external_url', 'repo_path')),
+  CHECK (media_type_source IN ('sniffed', 'declared', 'inferred', 'unknown')),
+  CHECK (
+    (source_type = 'managed_blob' AND blob_id IS NOT NULL AND external_url IS NULL AND repo_path IS NULL) OR
+    (source_type = 'external_url' AND blob_id IS NULL AND external_url IS NOT NULL AND repo_path IS NULL) OR
+    (source_type = 'repo_path'    AND blob_id IS NULL AND external_url IS NULL AND repo_path IS NOT NULL)
+  ),
+  CHECK (expires_at IS NULL OR expires_at >= created_at)
+);
+
+CREATE TABLE IF NOT EXISTS attachment_labels (
+  attachment_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  PRIMARY KEY (attachment_id, label),
+  FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_task_created ON attachments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_kind ON attachments(kind);
+CREATE INDEX IF NOT EXISTS idx_attachments_media_type ON attachments(media_type);
+CREATE INDEX IF NOT EXISTS idx_attachments_source_type ON attachments(source_type);
+CREATE INDEX IF NOT EXISTS idx_attachments_blob_id ON attachments(blob_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_expires_at ON attachments(expires_at);
+CREATE INDEX IF NOT EXISTS idx_attachment_labels_label ON attachment_labels(label);
+`,
+},
+```
 
 ## Service and interface plan
 
@@ -141,6 +306,9 @@ type AttachmentStore interface {
     GetAttachment(ctx context.Context, id string) (*models.Attachment, error)
     ListAttachmentsByTask(ctx context.Context, taskID string) ([]models.Attachment, error)
     DeleteAttachment(ctx context.Context, id string) error
+
+    ReplaceAttachmentLabels(ctx context.Context, attachmentID string, labels []string) error
+    ListAttachmentLabels(ctx context.Context, attachmentID string) ([]string, error)
 
     UpsertBlob(ctx context.Context, b *models.Blob) (*models.Blob, error)
     GetBlob(ctx context.Context, id string) (*models.Blob, error)
@@ -175,7 +343,7 @@ Add `AttachmentService` in `internal/server`:
 - `DeleteAttachment(...)`
 - `GCBlobs(...)`
 
-All validation and business rules should live here (consistent with project rules).
+All validation and business rules should live here (consistent with project rules), including MIME normalization/mismatch handling and attachment label normalization.
 
 ---
 
@@ -183,17 +351,20 @@ All validation and business rules should live here (consistent with project rule
 
 ### Create managed attachment
 `POST /v1/tasks/{id}/attachments` (multipart)
-- fields: `kind` (required), `title` (optional), `expires_at` (optional), `content` (required file)
+- fields: `kind` (required), `title` (optional), `expires_at` (optional), `media_type` (optional), `labels[]` (optional), `content` (required file)
 
 ### Create link attachment
 `POST /v1/tasks/{id}/attachments/link` (JSON)
 - body supports one of `external_url` or `repo_path`
+- optional fields: `media_type`, `labels[]`
 
 ### List/show/get/delete
 - `GET /v1/tasks/{id}/attachments`
 - `GET /v1/attachments/{attachment_id}`
 - `GET /v1/attachments/{attachment_id}/content` (managed only)
 - `DELETE /v1/attachments/{attachment_id}`
+
+List/show responses should include `media_type`, `media_type_source`, and `labels[]`.
 
 Error mapping:
 - validation -> `badRequest`
@@ -243,13 +414,15 @@ Output JSON fields:
 ## Backward compatibility
 - Existing task model remains unchanged.
 - `spec_id` remains supported.
-- No automatic `spec_id` backfill into attachments in migration v4.
+- No automatic `spec_id` backfill into attachments in migration v5.
   - Optional future command: `grns admin backfill-spec-attachments`.
 
 ---
 
 ## Config keys (proposed)
 - `attachments.max_upload_bytes` (default `104857600`)
+- `attachments.allowed_media_types` (default empty = allow all)
+- `attachments.reject_media_type_mismatch` (default `true`)
 - `attachments.gc_batch_size` (default `500`)
 - `attachments.gc_interval` (default `24h`)
 - `attachments.enable_archive_inspection` (default `false`)
@@ -265,18 +438,22 @@ If archive inspection is enabled later:
 
 ### Store tests
 - Create/list/get/delete attachments.
-- Constraint violations (bad source shape, invalid kind/source_type).
+- Constraint violations (bad source shape, invalid kind/source_type/media_type_source).
+- Label persistence via `attachment_labels`.
 - Blob upsert by SHA-256 uniqueness.
 - Unreferenced blob query correctness.
 
 ### Service tests
 - Input validation and normalization.
+- MIME detection/normalization and mismatch behavior.
+- Label normalization/dedupe behavior.
 - Error type mapping (`badRequest`, `notFound`, `conflict`).
 - Partial failure behavior (orphan candidate path).
 
 ### Integration (BATS)
 - attach add -> attach list -> attach get -> attach rm
 - add-link (url + repo-path)
+- media_type and label round-trip in JSON responses
 - gc-blobs dry-run/apply
 
 ---
@@ -286,8 +463,9 @@ If archive inspection is enabled later:
 2. Should duplicate link attachments (same task + same URL/path) be deduped?
 3. Should attachment IDs use deterministic or random generation?
 4. Should GC run only via command in MVP, or also as periodic daemon task?
+5. Should `reject_media_type_mismatch` be globally strict, or allow per-command override for trusted workflows?
 
 ---
 
 ## Recommendation
-Use migration v4 above as the concrete MVP baseline, then implement `AttachmentService` + `AttachmentStore` + local CAS `BlobStore` with explicit GC semantics.
+Use migration v5 above as the concrete MVP baseline, then implement `AttachmentService` + `AttachmentStore` + local CAS `BlobStore` with explicit GC semantics, adopting the 3-axis classification model (`kind`, `media_type`, `labels`).

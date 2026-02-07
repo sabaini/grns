@@ -28,34 +28,42 @@ const (
 
 // Server wraps HTTP handlers for the grns API.
 type Server struct {
-	addr          string
-	store         store.TaskStore
-	projectPrefix string
-	service       *TaskService
-	logger        *slog.Logger
-	apiToken      string
-	adminToken    string
-	importLimiter chan struct{}
-	exportLimiter chan struct{}
-	searchLimiter chan struct{}
+	addr              string
+	store             store.TaskStore
+	projectPrefix     string
+	service           *TaskService
+	attachmentService *AttachmentService
+	logger            *slog.Logger
+	apiToken          string
+	adminToken        string
+	importLimiter     chan struct{}
+	exportLimiter     chan struct{}
+	searchLimiter     chan struct{}
 }
 
 // New creates a new server instance.
-func New(addr string, store store.TaskStore, projectPrefix string, logger *slog.Logger) *Server {
+func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	var attachmentService *AttachmentService
+	if attachmentStore, ok := any(taskStore).(store.AttachmentStore); ok {
+		attachmentService = NewAttachmentService(taskStore, attachmentStore)
+	}
+
 	return &Server{
-		addr:          addr,
-		store:         store,
-		projectPrefix: projectPrefix,
-		service:       NewTaskService(store, projectPrefix),
-		logger:        logger,
-		apiToken:      strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
-		adminToken:    strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
-		importLimiter: make(chan struct{}, importConcurrencyLimit),
-		exportLimiter: make(chan struct{}, exportConcurrencyLimit),
-		searchLimiter: make(chan struct{}, searchConcurrencyLimit),
+		addr:              addr,
+		store:             taskStore,
+		projectPrefix:     projectPrefix,
+		service:           NewTaskService(taskStore, projectPrefix),
+		attachmentService: attachmentService,
+		logger:            logger,
+		apiToken:          strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
+		adminToken:        strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
+		importLimiter:     make(chan struct{}, importConcurrencyLimit),
+		exportLimiter:     make(chan struct{}, exportConcurrencyLimit),
+		searchLimiter:     make(chan struct{}, searchConcurrencyLimit),
 	}
 }
 

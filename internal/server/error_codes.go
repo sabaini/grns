@@ -21,6 +21,7 @@ const (
 	// Domain state (2xxx)
 	ErrCodeTaskNotFound       = 2001
 	ErrCodeDependencyNotFound = 2002
+	ErrCodeAttachmentNotFound = 2003
 	ErrCodeTaskIDExists       = 2101
 	ErrCodeConflict           = 2102
 
@@ -30,10 +31,11 @@ const (
 	ErrCodeResourceExhausted = 3003
 
 	// Internal/system (4xxx)
-	ErrCodeInternal     = 4001
-	ErrCodeStoreFailure = 4002
-	ErrCodeExportFailed = 4003
-	ErrCodeImportFailed = 4004
+	ErrCodeInternal       = 4001
+	ErrCodeStoreFailure   = 4002
+	ErrCodeExportFailed   = 4003
+	ErrCodeImportFailed   = 4004
+	ErrCodeNotImplemented = 4005
 )
 
 func defaultErrorCodeByStatus(status int) int {
@@ -52,6 +54,8 @@ func defaultErrorCodeByStatus(status int) int {
 		return ErrCodeResourceExhausted
 	case 500:
 		return ErrCodeInternal
+	case 501:
+		return ErrCodeNotImplemented
 	default:
 		return 0
 	}

@@ -100,6 +100,12 @@ grns label remove <id> [<id>...] <label>
 grns label list <id>
 grns label list-all
 
+grns attach add <task-id> <path> --kind <kind> [--title ...] [--media-type ...] [--label ...]
+grns attach add-link <task-id> --kind <kind> [--url <https://...>|--repo-path <path>] [--media-type ...] [--label ...]
+grns attach list <task-id>
+grns attach show <attachment-id>
+grns attach rm <attachment-id>
+
 grns import -i tasks.jsonl [--dry-run] [--dedupe skip|overwrite|error] [--orphan-handling allow|skip|strict]
 grns import -i tasks.jsonl --stream   # streaming NDJSON import (recommended for large files)
 grns export [-o tasks.jsonl]

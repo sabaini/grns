@@ -39,6 +39,16 @@ func GenerateID(prefix string, exists func(string) (bool, error)) (string, error
 	return "", fmt.Errorf("unable to generate unique id")
 }
 
+// GenerateAttachmentID returns a new attachment id using the at- prefix.
+func GenerateAttachmentID(exists func(string) (bool, error)) (string, error) {
+	return GenerateID("at", exists)
+}
+
+// GenerateBlobID returns a new blob id using the bl- prefix.
+func GenerateBlobID(exists func(string) (bool, error)) (string, error) {
+	return GenerateID("bl", exists)
+}
+
 func randomBase36(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {

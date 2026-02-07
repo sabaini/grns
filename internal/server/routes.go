@@ -36,6 +36,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/tasks/{id}/labels", s.handleAddTaskLabels)
 	mux.HandleFunc("DELETE /v1/tasks/{id}/labels", s.handleRemoveTaskLabels)
 
+	// Attachments.
+	mux.HandleFunc("POST /v1/tasks/{id}/attachments", s.handleCreateTaskAttachment)
+	mux.HandleFunc("POST /v1/tasks/{id}/attachments/link", s.handleCreateTaskAttachmentLink)
+	mux.HandleFunc("GET /v1/tasks/{id}/attachments", s.handleListTaskAttachments)
+	mux.HandleFunc("GET /v1/attachments/{attachment_id}", s.handleGetAttachment)
+	mux.HandleFunc("GET /v1/attachments/{attachment_id}/content", s.handleGetAttachmentContent)
+	mux.HandleFunc("DELETE /v1/attachments/{attachment_id}", s.handleDeleteAttachment)
+
 	// Dependency tree.
 	mux.HandleFunc("GET /v1/tasks/{id}/deps/tree", s.handleDepTree)
 

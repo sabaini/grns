@@ -53,3 +53,21 @@ func TestGenerateID(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerateAttachmentAndBlobID(t *testing.T) {
+	attachmentID, err := GenerateAttachmentID(nil)
+	if err != nil {
+		t.Fatalf("generate attachment id: %v", err)
+	}
+	if len(attachmentID) != 7 || attachmentID[:3] != "at-" {
+		t.Fatalf("expected attachment id with at- prefix, got %q", attachmentID)
+	}
+
+	blobID, err := GenerateBlobID(nil)
+	if err != nil {
+		t.Fatalf("generate blob id: %v", err)
+	}
+	if len(blobID) != 7 || blobID[:3] != "bl-" {
+		t.Fatalf("expected blob id with bl- prefix, got %q", blobID)
+	}
+}

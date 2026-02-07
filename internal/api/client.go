@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"grns/internal/models"
 )
 
 const (
@@ -271,6 +274,107 @@ func (c *Client) ListLabels(ctx context.Context, id string) ([]string, error) {
 func (c *Client) ListAllLabels(ctx context.Context) ([]string, error) {
 	var resp []string
 	err := c.do(ctx, http.MethodGet, "/v1/labels", nil, nil, &resp)
+	return resp, err
+}
+
+// CreateTaskAttachment uploads managed attachment content via POST /v1/tasks/{id}/attachments.
+func (c *Client) CreateTaskAttachment(ctx context.Context, taskID string, req AttachmentUploadRequest, content io.Reader) (models.Attachment, error) {
+	var resp models.Attachment
+	if content == nil {
+		return resp, fmt.Errorf("content is required")
+	}
+
+	payload := &bytes.Buffer{}
+	writer := multipart.NewWriter(payload)
+	if err := writer.WriteField("kind", req.Kind); err != nil {
+		return resp, err
+	}
+	if req.Title != "" {
+		if err := writer.WriteField("title", req.Title); err != nil {
+			return resp, err
+		}
+	}
+	if req.MediaType != "" {
+		if err := writer.WriteField("media_type", req.MediaType); err != nil {
+			return resp, err
+		}
+	}
+	if req.ExpiresAt != nil {
+		if err := writer.WriteField("expires_at", req.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+			return resp, err
+		}
+	}
+	for _, label := range req.Labels {
+		if strings.TrimSpace(label) == "" {
+			continue
+		}
+		if err := writer.WriteField("label", label); err != nil {
+			return resp, err
+		}
+	}
+
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		filename = "attachment.bin"
+	}
+	part, err := writer.CreateFormFile("content", filename)
+	if err != nil {
+		return resp, err
+	}
+	if _, err := io.Copy(part, content); err != nil {
+		return resp, err
+	}
+	if err := writer.Close(); err != nil {
+		return resp, err
+	}
+
+	endpoint := c.baseURL + "/v1/tasks/" + url.PathEscape(taskID) + "/attachments"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload.Bytes()))
+	if err != nil {
+		return resp, err
+	}
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setAuthHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+// CreateTaskAttachmentLink creates a link/repo attachment via POST /v1/tasks/{id}/attachments/link.
+func (c *Client) CreateTaskAttachmentLink(ctx context.Context, taskID string, req AttachmentCreateLinkRequest) (models.Attachment, error) {
+	var resp models.Attachment
+	err := c.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/attachments/link", nil, req, &resp)
+	return resp, err
+}
+
+// ListTaskAttachments lists task attachments via GET /v1/tasks/{id}/attachments.
+func (c *Client) ListTaskAttachments(ctx context.Context, taskID string) ([]models.Attachment, error) {
+	var resp []models.Attachment
+	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID)+"/attachments", nil, nil, &resp)
+	return resp, err
+}
+
+// GetAttachment fetches an attachment by id via GET /v1/attachments/{attachment_id}.
+func (c *Client) GetAttachment(ctx context.Context, attachmentID string) (models.Attachment, error) {
+	var resp models.Attachment
+	err := c.do(ctx, http.MethodGet, "/v1/attachments/"+url.PathEscape(attachmentID), nil, nil, &resp)
+	return resp, err
+}
+
+// DeleteAttachment deletes an attachment via DELETE /v1/attachments/{attachment_id}.
+func (c *Client) DeleteAttachment(ctx context.Context, attachmentID string) (map[string]any, error) {
+	var resp map[string]any
+	err := c.do(ctx, http.MethodDelete, "/v1/attachments/"+url.PathEscape(attachmentID), nil, nil, &resp)
 	return resp, err
 }
 
