@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+*.exe
+*.test
+*.out
+coverage.out
+*.coverprofile
+
+# Local runtime files
+*.db
+*.db-shm
+*.db-wal
+.grns.db
+*.log
+
+# Python test caches
+__pycache__/
+.pytest_cache/
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
