@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -34,6 +35,10 @@ func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
 
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
+		return
+	}
+
+	if !s.requireScopedTask(w, r, project, id) {
 		return
 	}
 
@@ -93,12 +98,17 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+	project, ok := s.pathProjectOrBadRequest(w, r)
+	if !ok {
 		return
 	}
 
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
+		return
+	}
+
+	if !s.requireScopedTask(w, r, project, id) {
 		return
 	}
 
@@ -109,6 +119,24 @@ func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, labels)
+}
+
+func (s *Server) requireScopedTask(w http.ResponseWriter, r *http.Request, project, id string) bool {
+	if !taskIDBelongsToProject(id, project) {
+		s.writeErrorReq(w, r, http.StatusNotFound, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound))
+		return false
+	}
+
+	task, err := s.store.GetTask(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, r, err)
+		return false
+	}
+	if task == nil {
+		s.writeErrorReq(w, r, http.StatusNotFound, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound))
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
