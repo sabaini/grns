@@ -25,6 +25,7 @@ func newAdminCleanupCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		olderThan int
 		dryRun    bool
 		force     bool
+		project   string
 	)
 
 	cmd := &cobra.Command{
@@ -42,6 +43,7 @@ func newAdminCleanupCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 				req := api.CleanupRequest{
 					OlderThanDays: olderThan,
 					DryRun:        dryRun,
+					Project:       project,
 				}
 				resp, err := client.AdminCleanup(cmd.Context(), req, force)
 				if err != nil {
@@ -74,6 +76,7 @@ func newAdminCleanupCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().IntVar(&olderThan, "older-than", 0, "remove tasks closed/updated more than N days ago (required)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be removed without deleting")
 	cmd.Flags().BoolVar(&force, "force", false, "actually delete tasks (required for non-dry-run)")
+	cmd.Flags().StringVar(&project, "project", "", "optional project scope for cleanup (e.g. gr)")
 
 	return cmd
 }

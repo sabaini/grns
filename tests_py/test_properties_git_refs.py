@@ -14,7 +14,7 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from tests_py.helpers import api_get, api_post
+from tests_py.helpers import api_get, api_post, scoped_api_path
 from tests_py.strategies_git_refs import (
     git_hash_invalid,
     git_hash_valid,
@@ -50,7 +50,7 @@ NOTE_TEXT = st.text(
 
 
 def request_json(env: dict[str, str], method: str, path: str, body: dict | None = None) -> tuple[int, dict | list]:
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Content-Type": "application/json"} if body is not None else {}
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -80,7 +80,7 @@ def create_task(env: dict[str, str], source_repo: str | None = None) -> dict:
     body: dict[str, object] = {"title": "git ref test task"}
     if source_repo is not None:
         body["source_repo"] = source_repo
-    return api_post(env, "/v1/tasks", body)
+    return api_post(env, "/v1/projects/gr/tasks", body)
 
 
 def canonical_repo_slug(raw: str) -> str:
@@ -199,7 +199,7 @@ def test_git_ref_create_get_list_roundtrip(running_server, data, payload):
     source_repo = data.draw(st.sampled_from(source_forms))
     task = create_task(env, source_repo=source_repo)
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", payload)
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", payload)
     assert status == 201
     assert GIT_REF_ID_RE.match(created["id"])
 
@@ -215,12 +215,12 @@ def test_git_ref_create_get_list_roundtrip(running_server, data, payload):
     if "meta" in payload:
         assert created.get("meta", {}) == payload["meta"]
 
-    status, fetched = request_json(env, "GET", f"/v1/git-refs/{created['id']}")
+    status, fetched = request_json(env, "GET", f"/v1/projects/gr/git-refs/{created['id']}")
     assert status == 200
     assert fetched["id"] == created["id"]
     assert ref_signature(fetched) == ref_signature(created)
 
-    status, listed = request_json(env, "GET", f"/v1/tasks/{task['id']}/git-refs")
+    status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task['id']}/git-refs")
     assert status == 200
     assert isinstance(listed, list)
     matches = [ref for ref in listed if ref["id"] == created["id"]]
@@ -246,13 +246,13 @@ def test_repo_canonicalization_equivalence_conflicts(running_server, pair, commi
         "object_value": commit,
     }
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", payload)
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", payload)
     assert status == 201
     assert created["repo"] == canonical
 
     for form in forms[1:]:
         payload["repo"] = form
-        status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", payload)
+        status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", payload)
         assert_error_contract(status, err, 409, "conflict")
 
 
@@ -274,13 +274,13 @@ def test_source_repo_fallback_and_missing_required(running_server, pair):
         "object_type": "path",
         "object_value": "docs/design.md",
     }
-    status, created = request_json(env, "POST", f"/v1/tasks/{task_a['id']}/git-refs", payload)
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_a['id']}/git-refs", payload)
     assert status == 201
     assert created["repo"] == canonical
 
     # Case B: fallback unavailable.
     task_b = create_task(env)
-    status, err = request_json(env, "POST", f"/v1/tasks/{task_b['id']}/git-refs", payload)
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_b['id']}/git-refs", payload)
     assert_error_contract(status, err, 400, "invalid_argument")
     assert "required" in err["error"].lower()
 
@@ -296,7 +296,7 @@ def test_hash_object_types_normalize_lowercase(running_server, object_type, obje
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "related",
         "object_type": object_type,
         "object_value": object_value,
@@ -314,7 +314,7 @@ def test_hash_object_types_reject_invalid_hashes(running_server, object_type, ba
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "related",
         "object_type": object_type,
         "object_value": bad_hash,
@@ -329,7 +329,7 @@ def test_path_object_type_normalizes_paths(running_server, path_value):
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "implements",
         "object_type": "path",
         "object_value": path_value,
@@ -345,7 +345,7 @@ def test_path_object_type_rejects_absolute_or_escaping_paths(running_server, pat
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "implements",
         "object_type": "path",
         "object_value": path_value,
@@ -368,7 +368,7 @@ def test_branch_tag_whitespace_rules(running_server, object_type, good_ref, bad_
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "related",
         "object_type": object_type,
         "object_value": good_ref,
@@ -376,7 +376,7 @@ def test_branch_tag_whitespace_rules(running_server, object_type, good_ref, bad_
     assert status == 201
     assert created["object_value"] == good_ref.strip()
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": "related",
         "object_type": object_type,
         "object_value": bad_ref,
@@ -395,7 +395,7 @@ def test_relation_valid_values_normalize_and_pass(running_server, relation):
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": relation,
         "object_type": "branch",
         "object_value": "main",
@@ -411,7 +411,7 @@ def test_relation_invalid_values_rejected(running_server, relation):
     env = running_server
     task = create_task(env, source_repo="github.com/acme/repo")
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
         "relation": relation,
         "object_type": "branch",
         "object_value": "main",
@@ -445,10 +445,10 @@ def test_git_ref_dedupe_invariant(running_server, repo_a, repo_b, h1, h2, h3):
         "resolved_commit": h2,
     }
 
-    status, _ = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", base)
+    status, _ = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", base)
     assert status == 201
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", base)
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", base)
     assert_error_contract(status, err, 409, "conflict")
 
     variants = [
@@ -460,7 +460,7 @@ def test_git_ref_dedupe_invariant(running_server, repo_a, repo_b, h1, h2, h3):
     ]
 
     for payload in variants:
-        status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", payload)
+        status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", payload)
         assert status == 201, created
 
 
@@ -477,7 +477,7 @@ def test_delete_semantics_remove_only_targeted_refs(running_server, data, n_refs
 
     created_ids: list[str] = []
     for i in range(n_refs):
-        status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+        status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
             "relation": "related",
             "object_type": "commit",
             "object_value": hash_for_index(i + 1),
@@ -490,21 +490,21 @@ def test_delete_semantics_remove_only_targeted_refs(running_server, data, n_refs
     remaining_ids = set(created_ids) - deleted_ids
 
     for ref_id in deleted_ids:
-        status, _ = request_json(env, "DELETE", f"/v1/git-refs/{ref_id}")
+        status, _ = request_json(env, "DELETE", f"/v1/projects/gr/git-refs/{ref_id}")
         assert status == 200
 
-    status, listed = request_json(env, "GET", f"/v1/tasks/{task['id']}/git-refs")
+    status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task['id']}/git-refs")
     assert status == 200
     listed_ids = {ref["id"] for ref in listed}
     assert deleted_ids.isdisjoint(listed_ids)
     assert remaining_ids == listed_ids
 
     for ref_id in deleted_ids:
-        status, err = request_json(env, "GET", f"/v1/git-refs/{ref_id}")
+        status, err = request_json(env, "GET", f"/v1/projects/gr/git-refs/{ref_id}")
         assert_error_contract(status, err, 404, "not_found")
 
     for ref_id in remaining_ids:
-        status, _ = request_json(env, "GET", f"/v1/git-refs/{ref_id}")
+        status, _ = request_json(env, "GET", f"/v1/projects/gr/git-refs/{ref_id}")
         assert status == 200
 
 
@@ -531,13 +531,13 @@ def test_close_annotation_is_idempotent(running_server, data, n_tasks, commit, i
         close_payload["repo"] = data.draw(st.sampled_from(req_forms))
         expected_repo = req_canonical
 
-    status, first = request_json(env, "POST", "/v1/tasks/close", close_payload)
+    status, first = request_json(env, "POST", "/v1/projects/gr/tasks/close", close_payload)
     assert status == 200
     assert first["commit"] == commit.lower()
     assert first["annotated"] == n_tasks
 
     for task_id in ids:
-        status, listed = request_json(env, "GET", f"/v1/tasks/{task_id}/git-refs")
+        status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task_id}/git-refs")
         assert status == 200
         matching = [
             ref
@@ -549,12 +549,12 @@ def test_close_annotation_is_idempotent(running_server, data, n_tasks, commit, i
         ]
         assert len(matching) == 1
 
-    status, second = request_json(env, "POST", "/v1/tasks/close", close_payload)
+    status, second = request_json(env, "POST", "/v1/projects/gr/tasks/close", close_payload)
     assert status == 200
     assert second["annotated"] == 0
 
     for task_id in ids:
-        status, listed = request_json(env, "GET", f"/v1/tasks/{task_id}/git-refs")
+        status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task_id}/git-refs")
         assert status == 200
         sigs = [
             (
@@ -573,7 +573,7 @@ def test_close_repo_without_commit_is_rejected(running_server):
     env = running_server
     task_id = create_task(env, source_repo="github.com/acme/repo")["id"]
 
-    status, err = request_json(env, "POST", "/v1/tasks/close", {
+    status, err = request_json(env, "POST", "/v1/projects/gr/tasks/close", {
         "ids": [task_id],
         "repo": "github.com/acme/repo",
     })
@@ -584,7 +584,7 @@ def test_invalid_ids_and_missing_resources_for_git_refs(running_server):
     env = running_server
 
     # Invalid task/ref ids are rejected at validation layer.
-    status, err = request_json(env, "POST", "/v1/tasks/bad-id/git-refs", {
+    status, err = request_json(env, "POST", "/v1/projects/gr/tasks/bad-id/git-refs", {
         "repo": "github.com/acme/repo",
         "relation": "related",
         "object_type": "commit",
@@ -592,14 +592,14 @@ def test_invalid_ids_and_missing_resources_for_git_refs(running_server):
     })
     assert_error_contract(status, err, 400, "invalid_argument")
 
-    status, err = request_json(env, "GET", "/v1/git-refs/bad-ref")
+    status, err = request_json(env, "GET", "/v1/projects/gr/git-refs/bad-ref")
     assert_error_contract(status, err, 400, "invalid_argument")
 
-    status, err = request_json(env, "DELETE", "/v1/git-refs/bad-ref")
+    status, err = request_json(env, "DELETE", "/v1/projects/gr/git-refs/bad-ref")
     assert_error_contract(status, err, 400, "invalid_argument")
 
     # Missing task context returns not_found for list endpoint.
-    status, err = request_json(env, "GET", "/v1/tasks/gr-zzzz/git-refs")
+    status, err = request_json(env, "GET", "/v1/projects/gr/tasks/gr-zzzz/git-refs")
     assert_error_contract(status, err, 404, "not_found")
 
 
@@ -607,13 +607,13 @@ def test_close_with_invalid_commit_fails_and_does_not_close(running_server):
     env = running_server
     task_id = create_task(env, source_repo="github.com/acme/repo")["id"]
 
-    status, err = request_json(env, "POST", "/v1/tasks/close", {
+    status, err = request_json(env, "POST", "/v1/projects/gr/tasks/close", {
         "ids": [task_id],
         "commit": "not-a-hash",
     })
     assert_error_contract(status, err, 400, "invalid_argument")
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["status"] == "open"
 
 
@@ -623,7 +623,7 @@ def test_invalid_repo_formats_rejected_on_create_and_close(running_server):
 
     bad_repo = "https://github.com/acme"
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", {
         "repo": bad_repo,
         "relation": "related",
         "object_type": "commit",
@@ -631,14 +631,14 @@ def test_invalid_repo_formats_rejected_on_create_and_close(running_server):
     })
     assert_error_contract(status, err, 400, "invalid_argument")
 
-    status, err = request_json(env, "POST", "/v1/tasks/close", {
+    status, err = request_json(env, "POST", "/v1/projects/gr/tasks/close", {
         "ids": [task_id],
         "commit": hash_for_index(3),
         "repo": bad_repo,
     })
     assert_error_contract(status, err, 400, "invalid_argument")
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["status"] == "open"
 
 
@@ -653,10 +653,10 @@ def test_missing_required_fields_and_invalid_resolved_commit_rejected(running_se
     ]
 
     for payload in payloads:
-        status, err = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", payload)
+        status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", payload)
         assert_error_contract(status, err, 400, "invalid_argument")
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", {
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", {
         "relation": "related",
         "object_type": "commit",
         "object_value": hash_for_index(4),
@@ -675,10 +675,10 @@ def test_dedupe_treats_empty_and_omitted_resolved_commit_as_equivalent(running_s
         "object_value": hash_for_index(5),
     }
 
-    status, _ = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", base)
+    status, _ = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", base)
     assert status == 201
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", {**base, "resolved_commit": ""})
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", {**base, "resolved_commit": ""})
     assert_error_contract(status, err, 409, "conflict")
 
 
@@ -693,7 +693,7 @@ def test_task_delete_cascades_task_git_refs(running_server):
 
     created_ids = []
     for i in range(2):
-        status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+        status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
             "relation": "related",
             "object_type": "commit",
             "object_value": hash_for_index(100 + i),
@@ -709,11 +709,11 @@ def test_task_delete_cascades_task_git_refs(running_server):
     finally:
         con.close()
 
-    status, err = request_json(env, "GET", f"/v1/tasks/{task['id']}/git-refs")
+    status, err = request_json(env, "GET", f"/v1/projects/gr/tasks/{task['id']}/git-refs")
     assert_error_contract(status, err, 404, "not_found")
 
     for ref_id in created_ids:
-        status, err = request_json(env, "GET", f"/v1/git-refs/{ref_id}")
+        status, err = request_json(env, "GET", f"/v1/projects/gr/git-refs/{ref_id}")
         assert_error_contract(status, err, 404, "not_found")
 
 
@@ -732,7 +732,7 @@ def test_repo_catalog_idempotent_across_equivalent_repo_inputs(running_server, d
     for i in range(n_tasks):
         task = create_task(env, source_repo=forms[0])
         repo_form = data.draw(st.sampled_from(forms))
-        status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {
+        status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {
             "repo": repo_form,
             "relation": "related",
             "object_type": "commit",
@@ -778,24 +778,24 @@ def test_note_meta_roundtrip_and_dedupe_insensitivity(running_server, note1, not
         "meta": meta1,
     }
 
-    status, created = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", base)
+    status, created = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", base)
     assert status == 201
     assert created.get("note", "") == note1.strip()
     assert created.get("meta", {}) == meta1
 
-    fetched = api_get(env, f"/v1/git-refs/{created['id']}")
+    fetched = api_get(env, f"/v1/projects/gr/git-refs/{created['id']}")
     assert fetched.get("note", "") == note1.strip()
     assert fetched.get("meta", {}) == meta1
 
-    listed = api_get(env, f"/v1/tasks/{task['id']}/git-refs")
+    listed = api_get(env, f"/v1/projects/gr/tasks/{task['id']}/git-refs")
     assert len(listed) == 1
     assert listed[0].get("note", "") == note1.strip()
     assert listed[0].get("meta", {}) == meta1
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {**base, "note": note2})
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {**base, "note": note2})
     assert_error_contract(status, err, 409, "conflict")
 
-    status, err = request_json(env, "POST", f"/v1/tasks/{task['id']}/git-refs", {**base, "meta": meta2})
+    status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task['id']}/git-refs", {**base, "meta": meta2})
     assert_error_contract(status, err, 409, "conflict")
 
 
@@ -819,8 +819,8 @@ def test_same_git_object_can_be_referenced_by_multiple_tasks(running_server, rep
         "object_value": commit,
     }
 
-    status1, r1 = request_json(env, "POST", f"/v1/tasks/{t1['id']}/git-refs", payload)
-    status2, r2 = request_json(env, "POST", f"/v1/tasks/{t2['id']}/git-refs", payload)
+    status1, r1 = request_json(env, "POST", f"/v1/projects/gr/tasks/{t1['id']}/git-refs", payload)
+    status2, r2 = request_json(env, "POST", f"/v1/projects/gr/tasks/{t2['id']}/git-refs", payload)
 
     assert status1 == 201
     assert status2 == 201

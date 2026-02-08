@@ -168,7 +168,7 @@ func TestClientDecodeStructuredErrorCode(t *testing.T) {
 func TestClientAttachmentMethods(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks/gr-aa11/attachments":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/gr/tasks/gr-aa11/attachments":
 			if err := r.ParseMultipartForm(2 << 20); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte(`{"error":"bad multipart"}`))
@@ -181,19 +181,19 @@ func TestClientAttachmentMethods(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a110","task_id":"gr-aa11","kind":"artifact","source_type":"managed_blob","blob_id":"bl-b001"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/tasks/gr-aa11/attachments/link":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/gr/tasks/gr-aa11/attachments/link":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/tasks/gr-aa11/attachments":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/gr/tasks/gr-aa11/attachments":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[ {"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"} ]`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/attachments/at-a111":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/gr/attachments/at-a111":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/attachments/at-a111/content":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/gr/attachments/at-a111/content":
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("hello"))
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/attachments/at-a111":
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/projects/gr/attachments/at-a111":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a111"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/gc-blobs":

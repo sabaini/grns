@@ -192,10 +192,11 @@ func isInvalidSearchQuery(err error) bool {
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	maxBytes := defaultJSONMaxBody
-	switch r.URL.Path {
-	case "/v1/import":
+	path := strings.TrimSpace(r.URL.Path)
+	switch {
+	case strings.HasSuffix(path, "/import"):
 		maxBytes = importJSONMaxBody
-	case "/v1/tasks/batch":
+	case strings.HasSuffix(path, "/tasks/batch"):
 		maxBytes = batchJSONMaxBody
 	}
 
@@ -259,6 +260,15 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 	s.writeErrorReq(w, r, http.StatusInternalServerError, storeFailure(err))
 }
 
+func (s *Server) pathProjectOrBadRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	project, err := requirePathProject(r)
+	if err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, err)
+		return "", false
+	}
+	return project, true
+}
+
 func (s *Server) pathIDOrBadRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id, err := requirePathID(r)
 	if err != nil {
@@ -297,6 +307,15 @@ func splitCSV(value string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func requirePathProject(r *http.Request) (string, error) {
+	project := strings.TrimSpace(r.PathValue("project"))
+	normalized, err := normalizePrefix(project)
+	if err != nil {
+		return "", badRequestCode(fmt.Errorf("invalid project"), ErrCodeInvalidArgument)
+	}
+	return normalized, nil
 }
 
 func requirePathID(r *http.Request) (string, error) {

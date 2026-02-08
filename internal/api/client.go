@@ -28,6 +28,7 @@ const (
 	apiTokenEnvKey       = "GRNS_API_TOKEN"
 	adminTokenEnvKey     = "GRNS_ADMIN_TOKEN"
 	idempotentRetryCount = 2 // total attempts = retry count + 1
+	defaultProject       = "gr"
 )
 
 var (
@@ -38,6 +39,7 @@ var (
 // Client is a simple HTTP client for the grns API.
 type Client struct {
 	baseURL    string
+	project    string
 	http       *http.Client
 	authToken  string
 	adminToken string
@@ -47,10 +49,30 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
+		project:    defaultProject,
 		http:       &http.Client{Timeout: httpTimeoutFromEnv()},
 		authToken:  strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
 		adminToken: strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
 	}
+}
+
+// SetProject sets the default project used for project-scoped endpoints.
+func (c *Client) SetProject(project string) {
+	if c == nil {
+		return
+	}
+	c.project = normalizeProject(project)
+}
+
+func (c *Client) scopedPath(path string) string {
+	if c == nil {
+		return path
+	}
+	project := normalizeProject(c.project)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return "/v1/projects/" + url.PathEscape(project) + path
 }
 
 // Ping checks whether the API server is reachable.
@@ -68,77 +90,77 @@ func (c *Client) GetInfo(ctx context.Context) (InfoResponse, error) {
 // CreateTask creates a task via POST /v1/tasks.
 func (c *Client) CreateTask(ctx context.Context, req TaskCreateRequest) (TaskResponse, error) {
 	var resp TaskResponse
-	err := c.do(ctx, http.MethodPost, "/v1/tasks", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks"), nil, req, &resp)
 	return resp, err
 }
 
 // BatchCreate creates tasks in a single request via POST /v1/tasks/batch.
 func (c *Client) BatchCreate(ctx context.Context, req []TaskCreateRequest) ([]TaskResponse, error) {
 	var resp []TaskResponse
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/batch", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/batch"), nil, req, &resp)
 	return resp, err
 }
 
 // GetTask fetches a task by ID via GET /v1/tasks/{id}.
 func (c *Client) GetTask(ctx context.Context, id string) (TaskResponse, error) {
 	var resp TaskResponse
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(id), nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/"+url.PathEscape(id)), nil, nil, &resp)
 	return resp, err
 }
 
 // GetTasks fetches multiple tasks in one request via POST /v1/tasks/get.
 func (c *Client) GetTasks(ctx context.Context, ids []string) ([]TaskResponse, error) {
 	var resp []TaskResponse
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/get", nil, TaskGetManyRequest{IDs: ids}, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/get"), nil, TaskGetManyRequest{IDs: ids}, &resp)
 	return resp, err
 }
 
 // UpdateTask updates a task by ID via PATCH /v1/tasks/{id}.
 func (c *Client) UpdateTask(ctx context.Context, id string, req TaskUpdateRequest) (TaskResponse, error) {
 	var resp TaskResponse
-	err := c.do(ctx, http.MethodPatch, "/v1/tasks/"+url.PathEscape(id), nil, req, &resp)
+	err := c.do(ctx, http.MethodPatch, c.scopedPath("/tasks/"+url.PathEscape(id)), nil, req, &resp)
 	return resp, err
 }
 
 // ListTasks returns tasks matching query filters via GET /v1/tasks.
 func (c *Client) ListTasks(ctx context.Context, query url.Values) ([]TaskResponse, error) {
 	var resp []TaskResponse
-	err := c.do(ctx, http.MethodGet, "/v1/tasks", query, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks"), query, nil, &resp)
 	return resp, err
 }
 
 // Ready returns ready-to-work tasks via GET /v1/tasks/ready.
 func (c *Client) Ready(ctx context.Context, query url.Values) ([]TaskResponse, error) {
 	var resp []TaskResponse
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/ready", query, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/ready"), query, nil, &resp)
 	return resp, err
 }
 
 // Stale returns stale tasks via GET /v1/tasks/stale.
 func (c *Client) Stale(ctx context.Context, query url.Values) ([]TaskResponse, error) {
 	var resp []TaskResponse
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/stale", query, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/stale"), query, nil, &resp)
 	return resp, err
 }
 
 // CloseTasks closes one or more tasks via POST /v1/tasks/close.
 func (c *Client) CloseTasks(ctx context.Context, req TaskCloseRequest) (map[string]any, error) {
 	var resp map[string]any
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/close", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/close"), nil, req, &resp)
 	return resp, err
 }
 
 // ReopenTasks reopens one or more tasks via POST /v1/tasks/reopen.
 func (c *Client) ReopenTasks(ctx context.Context, req TaskReopenRequest) (map[string]any, error) {
 	var resp map[string]any
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/reopen", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/reopen"), nil, req, &resp)
 	return resp, err
 }
 
 // DependencyTree returns the dependency tree for a task via GET /v1/tasks/{id}/deps/tree.
 func (c *Client) DependencyTree(ctx context.Context, id string) (DepTreeResponse, error) {
 	var resp DepTreeResponse
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(id)+"/deps/tree", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/"+url.PathEscape(id))+"/deps/tree", nil, nil, &resp)
 	return resp, err
 }
 
@@ -175,7 +197,7 @@ func (c *Client) AdminCleanup(ctx context.Context, req CleanupRequest, confirm b
 // Import sends an import request.
 func (c *Client) Import(ctx context.Context, req ImportRequest) (ImportResponse, error) {
 	var resp ImportResponse
-	err := c.do(ctx, http.MethodPost, "/v1/import", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/import"), nil, req, &resp)
 	return resp, err
 }
 
@@ -196,7 +218,7 @@ func (c *Client) ImportStream(ctx context.Context, records io.Reader, dryRun boo
 		query.Set("atomic", "true")
 	}
 
-	endpoint := c.baseURL + "/v1/import/stream"
+	endpoint := c.baseURL + c.scopedPath("/import/stream")
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
 	}
@@ -225,7 +247,7 @@ func (c *Client) ImportStream(ctx context.Context, records io.Reader, dryRun boo
 
 // Export streams NDJSON export to a writer.
 func (c *Client) Export(ctx context.Context, w io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/export", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+c.scopedPath("/export"), nil)
 	if err != nil {
 		return err
 	}
@@ -245,63 +267,63 @@ func (c *Client) Export(ctx context.Context, w io.Writer) error {
 // AddDependency creates a dependency edge via POST /v1/deps.
 func (c *Client) AddDependency(ctx context.Context, req DepCreateRequest) (map[string]any, error) {
 	var resp map[string]any
-	err := c.do(ctx, http.MethodPost, "/v1/deps", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/deps"), nil, req, &resp)
 	return resp, err
 }
 
 // AddLabels adds labels to a task via POST /v1/tasks/{id}/labels.
 func (c *Client) AddLabels(ctx context.Context, id string, req LabelsRequest) ([]string, error) {
 	var resp []string
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(id)+"/labels", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/"+url.PathEscape(id)+"/labels"), nil, req, &resp)
 	return resp, err
 }
 
 // RemoveLabels removes labels from a task via DELETE /v1/tasks/{id}/labels.
 func (c *Client) RemoveLabels(ctx context.Context, id string, req LabelsRequest) ([]string, error) {
 	var resp []string
-	err := c.do(ctx, http.MethodDelete, "/v1/tasks/"+url.PathEscape(id)+"/labels", nil, req, &resp)
+	err := c.do(ctx, http.MethodDelete, c.scopedPath("/tasks/"+url.PathEscape(id)+"/labels"), nil, req, &resp)
 	return resp, err
 }
 
 // ListLabels lists labels for a task via GET /v1/tasks/{id}/labels.
 func (c *Client) ListLabels(ctx context.Context, id string) ([]string, error) {
 	var resp []string
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(id)+"/labels", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/"+url.PathEscape(id)+"/labels"), nil, nil, &resp)
 	return resp, err
 }
 
 // ListAllLabels lists all labels in the project via GET /v1/labels.
 func (c *Client) ListAllLabels(ctx context.Context) ([]string, error) {
 	var resp []string
-	err := c.do(ctx, http.MethodGet, "/v1/labels", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/labels"), nil, nil, &resp)
 	return resp, err
 }
 
 // CreateTaskGitRef creates one git reference for a task via POST /v1/tasks/{id}/git-refs.
 func (c *Client) CreateTaskGitRef(ctx context.Context, taskID string, req TaskGitRefCreateRequest) (models.TaskGitRef, error) {
 	var resp models.TaskGitRef
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/git-refs", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/"+url.PathEscape(taskID)+"/git-refs"), nil, req, &resp)
 	return resp, err
 }
 
 // ListTaskGitRefs lists git references for one task via GET /v1/tasks/{id}/git-refs.
 func (c *Client) ListTaskGitRefs(ctx context.Context, taskID string) ([]models.TaskGitRef, error) {
 	var resp []models.TaskGitRef
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID)+"/git-refs", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/"+url.PathEscape(taskID)+"/git-refs"), nil, nil, &resp)
 	return resp, err
 }
 
 // GetTaskGitRef fetches one git reference by id via GET /v1/git-refs/{ref_id}.
 func (c *Client) GetTaskGitRef(ctx context.Context, refID string) (models.TaskGitRef, error) {
 	var resp models.TaskGitRef
-	err := c.do(ctx, http.MethodGet, "/v1/git-refs/"+url.PathEscape(refID), nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/git-refs/"+url.PathEscape(refID)), nil, nil, &resp)
 	return resp, err
 }
 
 // DeleteTaskGitRef deletes one git reference by id via DELETE /v1/git-refs/{ref_id}.
 func (c *Client) DeleteTaskGitRef(ctx context.Context, refID string) (map[string]any, error) {
 	var resp map[string]any
-	err := c.do(ctx, http.MethodDelete, "/v1/git-refs/"+url.PathEscape(refID), nil, nil, &resp)
+	err := c.do(ctx, http.MethodDelete, c.scopedPath("/git-refs/"+url.PathEscape(refID)), nil, nil, &resp)
 	return resp, err
 }
 
@@ -356,7 +378,7 @@ func (c *Client) CreateTaskAttachment(ctx context.Context, taskID string, req At
 		return resp, err
 	}
 
-	endpoint := c.baseURL + "/v1/tasks/" + url.PathEscape(taskID) + "/attachments"
+	endpoint := c.baseURL + c.scopedPath("/tasks/"+url.PathEscape(taskID)+"/attachments")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload.Bytes()))
 	if err != nil {
 		return resp, err
@@ -381,21 +403,21 @@ func (c *Client) CreateTaskAttachment(ctx context.Context, taskID string, req At
 // CreateTaskAttachmentLink creates a link/repo attachment via POST /v1/tasks/{id}/attachments/link.
 func (c *Client) CreateTaskAttachmentLink(ctx context.Context, taskID string, req AttachmentCreateLinkRequest) (models.Attachment, error) {
 	var resp models.Attachment
-	err := c.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/attachments/link", nil, req, &resp)
+	err := c.do(ctx, http.MethodPost, c.scopedPath("/tasks/"+url.PathEscape(taskID)+"/attachments/link"), nil, req, &resp)
 	return resp, err
 }
 
 // ListTaskAttachments lists task attachments via GET /v1/tasks/{id}/attachments.
 func (c *Client) ListTaskAttachments(ctx context.Context, taskID string) ([]models.Attachment, error) {
 	var resp []models.Attachment
-	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID)+"/attachments", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/tasks/"+url.PathEscape(taskID)+"/attachments"), nil, nil, &resp)
 	return resp, err
 }
 
 // GetAttachment fetches an attachment by id via GET /v1/attachments/{attachment_id}.
 func (c *Client) GetAttachment(ctx context.Context, attachmentID string) (models.Attachment, error) {
 	var resp models.Attachment
-	err := c.do(ctx, http.MethodGet, "/v1/attachments/"+url.PathEscape(attachmentID), nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, c.scopedPath("/attachments/"+url.PathEscape(attachmentID)), nil, nil, &resp)
 	return resp, err
 }
 
@@ -404,7 +426,7 @@ func (c *Client) GetAttachmentContent(ctx context.Context, attachmentID string, 
 	if w == nil {
 		return fmt.Errorf("writer is required")
 	}
-	endpoint := c.baseURL + "/v1/attachments/" + url.PathEscape(attachmentID) + "/content"
+	endpoint := c.baseURL + c.scopedPath("/attachments/"+url.PathEscape(attachmentID)) + "/content"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -426,7 +448,7 @@ func (c *Client) GetAttachmentContent(ctx context.Context, attachmentID string, 
 // DeleteAttachment deletes an attachment via DELETE /v1/attachments/{attachment_id}.
 func (c *Client) DeleteAttachment(ctx context.Context, attachmentID string) (map[string]any, error) {
 	var resp map[string]any
-	err := c.do(ctx, http.MethodDelete, "/v1/attachments/"+url.PathEscape(attachmentID), nil, nil, &resp)
+	err := c.do(ctx, http.MethodDelete, c.scopedPath("/attachments/"+url.PathEscape(attachmentID)), nil, nil, &resp)
 	return resp, err
 }
 
@@ -612,6 +634,19 @@ func (c *Client) setAdminHeader(req *http.Request) {
 		return
 	}
 	req.Header.Set("X-Admin-Token", c.adminToken)
+}
+
+func normalizeProject(project string) string {
+	project = strings.TrimSpace(strings.ToLower(project))
+	if len(project) != 2 {
+		return defaultProject
+	}
+	for _, r := range project {
+		if r < 'a' || r > 'z' {
+			return defaultProject
+		}
+	}
+	return project
 }
 
 func httpTimeoutFromEnv() time.Duration {

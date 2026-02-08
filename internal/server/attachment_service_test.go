@@ -247,7 +247,7 @@ func TestAttachmentServiceGCBlobs_TerminatesWhenDeletesFail(t *testing.T) {
 		t.Fatalf("upsert blob: %v", err)
 	}
 
-	svc := NewAttachmentService(st, st, failingDeleteBlobStore{})
+	svc := NewAttachmentService(st, st, failingDeleteBlobStore{}, "gr")
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
@@ -298,7 +298,7 @@ func newAttachmentServiceForTest(t *testing.T) (*AttachmentService, *store.Store
 		t.Fatalf("open blob store: %v", err)
 	}
 
-	return NewAttachmentService(st, st, cas), st
+	return NewAttachmentService(st, st, cas, "gr"), st
 }
 
 func asAPIError(err error, out *apiError) bool {

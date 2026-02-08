@@ -9,6 +9,10 @@ import (
 )
 
 func (s *Server) taskLabelsRequest(w http.ResponseWriter, r *http.Request) (string, []string, bool) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return "", nil, false
+	}
+
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
 		return "", nil, false
@@ -23,12 +27,17 @@ func (s *Server) taskLabelsRequest(w http.ResponseWriter, r *http.Request) (stri
 }
 
 func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.pathProjectOrBadRequest(w, r)
+	if !ok {
+		return
+	}
+
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
 		return
 	}
 
-	nodes, err := s.store.DependencyTree(r.Context(), id)
+	nodes, err := s.store.DependencyTree(r.Context(), project, id)
 	if err != nil {
 		s.writeStoreError(w, r, err)
 		return
@@ -44,6 +53,10 @@ func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	var req api.DepCreateRequest
 	if !s.decodeJSONReq(w, r, &req) {
 		return
@@ -65,7 +78,12 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
-	labels, err := s.store.ListAllLabels(r.Context())
+	project, ok := s.pathProjectOrBadRequest(w, r)
+	if !ok {
+		return
+	}
+
+	labels, err := s.store.ListAllLabels(r.Context(), project)
 	if err != nil {
 		s.writeStoreError(w, r, err)
 		return
@@ -75,6 +93,10 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
 		return

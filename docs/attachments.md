@@ -135,12 +135,12 @@ Allowed-media policy (if configured) applies to final normalized `media_type` wh
 
 ## API (MVP)
 
-- `POST /v1/tasks/{id}/attachments` (multipart managed upload)
-- `POST /v1/tasks/{id}/attachments/link` (JSON link/path)
-- `GET /v1/tasks/{id}/attachments`
-- `GET /v1/attachments/{attachment_id}`
-- `GET /v1/attachments/{attachment_id}/content` (managed only)
-- `DELETE /v1/attachments/{attachment_id}`
+- `POST /v1/projects/{project}/tasks/{id}/attachments` (multipart managed upload)
+- `POST /v1/projects/{project}/tasks/{id}/attachments/link` (JSON link/path)
+- `GET /v1/projects/{project}/tasks/{id}/attachments`
+- `GET /v1/projects/{project}/attachments/{attachment_id}`
+- `GET /v1/projects/{project}/attachments/{attachment_id}/content` (managed only)
+- `DELETE /v1/projects/{project}/attachments/{attachment_id}`
 - `POST /v1/admin/gc-blobs` (admin; dry-run/apply)
 
 Create endpoints stay split to avoid content-type ambiguity.

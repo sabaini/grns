@@ -49,6 +49,47 @@ func TestStoreInfo(t *testing.T) {
 	}
 }
 
+func TestCleanupClosedTasksProjectFilter(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	old := now.Add(-60 * 24 * time.Hour)
+
+	for _, task := range []*models.Task{
+		{ID: "gr-cpf1", Title: "gr old closed", Status: "closed", Type: "task", Priority: 2, CreatedAt: old, UpdatedAt: old, ClosedAt: &old},
+		{ID: "xy-cpf1", Title: "xy old closed", Status: "closed", Type: "task", Priority: 2, CreatedAt: old, UpdatedAt: old, ClosedAt: &old},
+	} {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	cutoff := now.Add(-30 * 24 * time.Hour)
+	result, err := st.CleanupClosedTasks(ctx, "gr", cutoff, false)
+	if err != nil {
+		t.Fatalf("cleanup project filter: %v", err)
+	}
+	if result.Count != 1 || len(result.TaskIDs) != 1 || result.TaskIDs[0] != "gr-cpf1" {
+		t.Fatalf("expected to delete only gr-cpf1, got %#v", result)
+	}
+
+	gr, err := st.GetTask(ctx, "gr-cpf1")
+	if err != nil {
+		t.Fatalf("get gr task: %v", err)
+	}
+	if gr != nil {
+		t.Fatal("expected gr-cpf1 to be deleted")
+	}
+
+	xy, err := st.GetTask(ctx, "xy-cpf1")
+	if err != nil {
+		t.Fatalf("get xy task: %v", err)
+	}
+	if xy == nil {
+		t.Fatal("expected xy-cpf1 to remain")
+	}
+}
+
 func TestCleanupClosedTasks(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
@@ -71,17 +112,17 @@ func TestCleanupClosedTasks(t *testing.T) {
 		t.Fatalf("add labels: %v", err)
 	}
 
-	if err := st.CloseTasks(ctx, []string{"gr-cl01", "gr-cl02"}, old); err != nil {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-cl01", "gr-cl02"}, old); err != nil {
 		t.Fatalf("close old: %v", err)
 	}
-	if err := st.CloseTasks(ctx, []string{"gr-cl03"}, now); err != nil {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-cl03"}, now); err != nil {
 		t.Fatalf("close recent: %v", err)
 	}
 
 	cutoff := now.Add(-30 * 24 * time.Hour)
 
 	t.Run("dry run", func(t *testing.T) {
-		result, err := st.CleanupClosedTasks(ctx, cutoff, true)
+		result, err := st.CleanupClosedTasks(ctx, "", cutoff, true)
 		if err != nil {
 			t.Fatalf("cleanup dry run: %v", err)
 		}
@@ -102,7 +143,7 @@ func TestCleanupClosedTasks(t *testing.T) {
 	})
 
 	t.Run("actual cleanup", func(t *testing.T) {
-		result, err := st.CleanupClosedTasks(ctx, cutoff, false)
+		result, err := st.CleanupClosedTasks(ctx, "", cutoff, false)
 		if err != nil {
 			t.Fatalf("cleanup: %v", err)
 		}

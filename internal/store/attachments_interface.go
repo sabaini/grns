@@ -12,9 +12,9 @@ import (
 // responsibilities decoupled.
 type AttachmentStore interface {
 	CreateAttachment(ctx context.Context, attachment *models.Attachment) error
-	GetAttachment(ctx context.Context, id string) (*models.Attachment, error)
-	ListAttachmentsByTask(ctx context.Context, taskID string) ([]models.Attachment, error)
-	DeleteAttachment(ctx context.Context, id string) error
+	GetAttachment(ctx context.Context, project, id string) (*models.Attachment, error)
+	ListAttachmentsByTask(ctx context.Context, project, taskID string) ([]models.Attachment, error)
+	DeleteAttachment(ctx context.Context, project, id string) error
 
 	ReplaceAttachmentLabels(ctx context.Context, attachmentID string, labels []string) error
 	ListAttachmentLabels(ctx context.Context, attachmentID string) ([]string, error)

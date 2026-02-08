@@ -68,7 +68,7 @@ func TestReadyTasks(t *testing.T) {
 		t.Fatalf("add dep: %v", err)
 	}
 
-	ready, err := st.ListReadyTasks(ctx, 0)
+	ready, err := st.ListReadyTasks(ctx, "gr", 0)
 	if err != nil {
 		t.Fatalf("ready: %v", err)
 	}
@@ -219,6 +219,69 @@ func TestListTasksWithSearch(t *testing.T) {
 			t.Fatalf("expected 0 results, got %d", len(result))
 		}
 	})
+}
+
+func TestListTasksProjectFilter(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, task := range []*models.Task{
+		{ID: "gr-pf01", Title: "gr task", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "xy-pf01", Title: "xy task", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	grTasks, err := st.ListTasks(ctx, ListFilter{Project: "gr"})
+	if err != nil {
+		t.Fatalf("list gr: %v", err)
+	}
+	if len(grTasks) != 1 || grTasks[0].ID != "gr-pf01" {
+		t.Fatalf("expected only gr-pf01, got %+v", grTasks)
+	}
+
+	xyTasks, err := st.ListTasks(ctx, ListFilter{Project: "xy"})
+	if err != nil {
+		t.Fatalf("list xy: %v", err)
+	}
+	if len(xyTasks) != 1 || xyTasks[0].ID != "xy-pf01" {
+		t.Fatalf("expected only xy-pf01, got %+v", xyTasks)
+	}
+}
+
+func TestStaleTasksProjectScope(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	old := now.Add(-45 * 24 * time.Hour)
+
+	for _, task := range []*models.Task{
+		{ID: "gr-st01", Title: "gr stale", Status: "open", Type: "task", Priority: 2, CreatedAt: old, UpdatedAt: old},
+		{ID: "xy-st01", Title: "xy stale", Status: "open", Type: "task", Priority: 2, CreatedAt: old, UpdatedAt: old},
+	} {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	grStale, err := st.ListStaleTasks(ctx, "gr", now.Add(-30*24*time.Hour), nil, 0)
+	if err != nil {
+		t.Fatalf("stale gr: %v", err)
+	}
+	if len(grStale) != 1 || grStale[0].ID != "gr-st01" {
+		t.Fatalf("expected only gr-st01, got %+v", grStale)
+	}
+
+	xyStale, err := st.ListStaleTasks(ctx, "xy", now.Add(-30*24*time.Hour), nil, 0)
+	if err != nil {
+		t.Fatalf("stale xy: %v", err)
+	}
+	if len(xyStale) != 1 || xyStale[0].ID != "xy-st01" {
+		t.Fatalf("expected only xy-st01, got %+v", xyStale)
+	}
 }
 
 func TestListTasksWithSpecRegexLimitOffset(t *testing.T) {

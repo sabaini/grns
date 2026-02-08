@@ -10,6 +10,10 @@ import (
 )
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	var req api.TaskCloseRequest
 	if !s.decodeJSONReq(w, r, &req) {
 		return
@@ -58,6 +62,10 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	ids, ok := s.decodeIDsReq(w, r)
 	if !ok {
 		return
@@ -72,6 +80,10 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	limit, err := queryInt(r, "limit")
 	if err != nil {
 		s.writeErrorReq(w, r, http.StatusBadRequest, err)
@@ -88,6 +100,10 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	days, err := queryIntDefault(r, "days", 30)
 	if err != nil {
 		s.writeErrorReq(w, r, http.StatusBadRequest, err)
@@ -124,6 +140,10 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	var req api.TaskCreateRequest
 	if !s.decodeJSONReq(w, r, &req) {
 		return
@@ -139,6 +159,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	var reqs []api.TaskCreateRequest
 	if !s.decodeJSONReq(w, r, &reqs) {
 		return
@@ -154,6 +178,10 @@ func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
 		return
@@ -169,6 +197,10 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	ids, ok := s.decodeIDsReq(w, r)
 	if !ok {
 		return
@@ -184,6 +216,10 @@ func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	id, ok := s.pathIDOrBadRequest(w, r)
 	if !ok {
 		return
@@ -204,6 +240,10 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	filter, err := parseListFilter(r)
 	if err != nil {
 		s.writeErrorReq(w, r, http.StatusBadRequest, err)

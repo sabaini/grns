@@ -61,6 +61,7 @@ var validAttachmentMediaTypeSources = map[AttachmentMediaTypeSource]struct{}{
 
 // Attachment is the user-facing attachment reference linked to a task.
 type Attachment struct {
+	Project         string         `json:"project,omitempty"`
 	ID              string         `json:"id"`
 	TaskID          string         `json:"task_id"`
 	Kind            string         `json:"kind"`

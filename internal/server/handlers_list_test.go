@@ -21,7 +21,7 @@ func TestHandleListTasksOffsetWithoutLimit(t *testing.T) {
 	seedListTask(t, srv, "gr-a001", "first", 1)
 	seedListTask(t, srv, "gr-a002", "second", 2)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?offset=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks?offset=1", nil)
 	w := httptest.NewRecorder()
 
 	srv.routes().ServeHTTP(w, req)
@@ -58,7 +58,7 @@ func TestHandleListTasksInvalidQueryParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/v1/tasks?"+tt.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks?"+tt.query, nil)
 			w := httptest.NewRecorder()
 
 			srv.routes().ServeHTTP(w, req)
@@ -84,7 +84,7 @@ func TestHandleListTasksMalformedSearch(t *testing.T) {
 	srv := newListTestServer(t)
 	seedListTask(t, srv, "gr-c001", "searchable", 1)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?search=%22", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks?search=%22", nil)
 	w := httptest.NewRecorder()
 
 	srv.routes().ServeHTTP(w, req)

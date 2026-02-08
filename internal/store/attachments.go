@@ -13,6 +13,7 @@ import (
 )
 
 const attachmentColumns = "id, task_id, kind, source_type, title, filename, media_type, media_type_source, blob_id, external_url, repo_path, meta_json, created_at, updated_at, expires_at"
+const qualifiedAttachmentColumns = "a.id, a.task_id, a.kind, a.source_type, a.title, a.filename, a.media_type, a.media_type_source, a.blob_id, a.external_url, a.repo_path, a.meta_json, a.created_at, a.updated_at, a.expires_at"
 const blobColumns = "id, sha256, size_bytes, storage_backend, blob_key, created_at"
 
 // CreateAttachment inserts one attachment row and optional labels.
@@ -60,8 +61,21 @@ func (s *Store) CreateAttachment(ctx context.Context, attachment *models.Attachm
 }
 
 // GetAttachment returns one attachment with labels.
-func (s *Store) GetAttachment(ctx context.Context, id string) (*models.Attachment, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+attachmentColumns+` FROM attachments WHERE id = ?`, id)
+func (s *Store) GetAttachment(ctx context.Context, project, id string) (*models.Attachment, error) {
+	project = normalizeProject(project)
+
+	var row *sql.Row
+	if project == "" {
+		row = s.db.QueryRowContext(ctx, `SELECT `+attachmentColumns+` FROM attachments WHERE id = ?`, id)
+	} else {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT `+qualifiedAttachmentColumns+`
+			FROM attachments a
+			JOIN tasks t ON t.id = a.task_id
+			WHERE a.id = ? AND t.project_id = ?
+		`, id, project)
+	}
+
 	attachment, err := scanAttachment(row)
 	if err != nil || attachment == nil {
 		return attachment, err
@@ -76,8 +90,24 @@ func (s *Store) GetAttachment(ctx context.Context, id string) (*models.Attachmen
 }
 
 // ListAttachmentsByTask lists attachments for a task ordered by created_at descending.
-func (s *Store) ListAttachmentsByTask(ctx context.Context, taskID string) ([]models.Attachment, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+attachmentColumns+` FROM attachments WHERE task_id = ? ORDER BY created_at DESC`, taskID)
+func (s *Store) ListAttachmentsByTask(ctx context.Context, project, taskID string) ([]models.Attachment, error) {
+	project = normalizeProject(project)
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if project == "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT `+attachmentColumns+` FROM attachments WHERE task_id = ? ORDER BY created_at DESC`, taskID)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT `+qualifiedAttachmentColumns+`
+			FROM attachments a
+			JOIN tasks t ON t.id = a.task_id
+			WHERE a.task_id = ? AND t.project_id = ?
+			ORDER BY a.created_at DESC
+		`, taskID, project)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +140,17 @@ func (s *Store) ListAttachmentsByTask(ctx context.Context, taskID string) ([]mod
 }
 
 // DeleteAttachment deletes one attachment row.
-func (s *Store) DeleteAttachment(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM attachments WHERE id = ?", id)
+func (s *Store) DeleteAttachment(ctx context.Context, project, id string) error {
+	project = normalizeProject(project)
+	if project == "" {
+		_, err := s.db.ExecContext(ctx, "DELETE FROM attachments WHERE id = ?", id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM attachments
+		WHERE id = ?
+		AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+	`, id, project)
 	return err
 }
 
@@ -433,6 +472,7 @@ func scanAttachment(scanner interface {
 		return nil, err
 	}
 
+	attachment.Project = projectFromTaskID(attachment.TaskID)
 	attachment.Title = title.String
 	attachment.Filename = filename.String
 	attachment.MediaType = mediaType.String

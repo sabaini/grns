@@ -116,15 +116,16 @@ Keep one metadata interface for SQLite simplicity:
 type AttachmentStore interface {
     // Attachments + labels
     CreateAttachment(ctx context.Context, attachment *models.Attachment) error
-    GetAttachment(ctx context.Context, id string) (*models.Attachment, error)
-    ListAttachmentsByTask(ctx context.Context, taskID string) ([]models.Attachment, error)
-    DeleteAttachment(ctx context.Context, id string) error
+    GetAttachment(ctx context.Context, project, id string) (*models.Attachment, error)
+    ListAttachmentsByTask(ctx context.Context, project, taskID string) ([]models.Attachment, error)
+    DeleteAttachment(ctx context.Context, project, id string) error
 
     ReplaceAttachmentLabels(ctx context.Context, attachmentID string, labels []string) error
     ListAttachmentLabels(ctx context.Context, attachmentID string) ([]string, error)
 
     // Blob metadata
     UpsertBlob(ctx context.Context, blob *models.Blob) (*models.Blob, error)
+    CreateManagedAttachmentWithBlob(ctx context.Context, blob *models.Blob, attachment *models.Attachment) (*models.Blob, error)
     GetBlob(ctx context.Context, id string) (*models.Blob, error)
     GetBlobBySHA256(ctx context.Context, sha string) (*models.Blob, error)
     ListUnreferencedBlobs(ctx context.Context, limit int) ([]models.Blob, error)
@@ -186,12 +187,12 @@ LIMIT ?;
 
 ## API contract (MVP)
 
-- `POST /v1/tasks/{id}/attachments` (multipart)
-- `POST /v1/tasks/{id}/attachments/link` (JSON)
-- `GET /v1/tasks/{id}/attachments`
-- `GET /v1/attachments/{attachment_id}`
-- `GET /v1/attachments/{attachment_id}/content`
-- `DELETE /v1/attachments/{attachment_id}`
+- `POST /v1/projects/{project}/tasks/{id}/attachments` (multipart)
+- `POST /v1/projects/{project}/tasks/{id}/attachments/link` (JSON)
+- `GET /v1/projects/{project}/tasks/{id}/attachments`
+- `GET /v1/projects/{project}/attachments/{attachment_id}`
+- `GET /v1/projects/{project}/attachments/{attachment_id}/content`
+- `DELETE /v1/projects/{project}/attachments/{attachment_id}`
 - `POST /v1/admin/gc-blobs`
 
 `POST /v1/admin/gc-blobs` request:

@@ -139,7 +139,7 @@ func TestCloseAndReopen(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := st.CloseTasks(ctx, []string{"gr-cr00"}, now); err != nil {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-cr00"}, now); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestCloseAndReopen(t *testing.T) {
 		t.Fatal("expected closed_at to be set")
 	}
 
-	if err := st.ReopenTasks(ctx, []string{"gr-cr00"}, now); err != nil {
+	if err := st.ReopenTasks(ctx, "gr", []string{"gr-cr00"}, now); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 
@@ -169,10 +169,10 @@ func TestCloseAndReopenMissingTask(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	if err := st.CloseTasks(ctx, []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
 		t.Fatalf("expected ErrTaskNotFound on close, got %v", err)
 	}
-	if err := st.ReopenTasks(ctx, []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
+	if err := st.ReopenTasks(ctx, "gr", []string{"gr-zzzz"}, now); err != ErrTaskNotFound {
 		t.Fatalf("expected ErrTaskNotFound on reopen, got %v", err)
 	}
 }
@@ -187,7 +187,7 @@ func TestCloseAndReopenAllOrNothingWithMissingIDs(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := st.CloseTasks(ctx, []string{"gr-mx11", "gr-mx99"}, now); err != ErrTaskNotFound {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-mx11", "gr-mx99"}, now); err != ErrTaskNotFound {
 		t.Fatalf("expected ErrTaskNotFound on mixed close, got %v", err)
 	}
 	got, err := st.GetTask(ctx, "gr-mx11")
@@ -198,10 +198,10 @@ func TestCloseAndReopenAllOrNothingWithMissingIDs(t *testing.T) {
 		t.Fatalf("expected task to remain open after failed mixed close, got %q", got.Status)
 	}
 
-	if err := st.CloseTasks(ctx, []string{"gr-mx11"}, now); err != nil {
+	if err := st.CloseTasks(ctx, "gr", []string{"gr-mx11"}, now); err != nil {
 		t.Fatalf("close existing: %v", err)
 	}
-	if err := st.ReopenTasks(ctx, []string{"gr-mx11", "gr-mx99"}, now); err != ErrTaskNotFound {
+	if err := st.ReopenTasks(ctx, "gr", []string{"gr-mx11", "gr-mx99"}, now); err != ErrTaskNotFound {
 		t.Fatalf("expected ErrTaskNotFound on mixed reopen, got %v", err)
 	}
 	got, err = st.GetTask(ctx, "gr-mx11")

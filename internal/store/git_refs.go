@@ -110,25 +110,54 @@ func (s *Store) CreateTaskGitRef(ctx context.Context, ref *models.TaskGitRef) er
 }
 
 // GetTaskGitRef returns one task git reference row by id.
-func (s *Store) GetTaskGitRef(ctx context.Context, id string) (*models.TaskGitRef, error) {
+func (s *Store) GetTaskGitRef(ctx context.Context, project, id string) (*models.TaskGitRef, error) {
+	project = normalizeProject(project)
+	if project == "" {
+		row := s.db.QueryRowContext(ctx, `
+			SELECT `+taskGitRefColumns+`
+			FROM task_git_refs r
+			JOIN git_repos g ON g.id = r.repo_id
+			WHERE r.id = ?
+		`, id)
+		return scanTaskGitRef(row)
+	}
+
 	row := s.db.QueryRowContext(ctx, `
 		SELECT `+taskGitRefColumns+`
 		FROM task_git_refs r
 		JOIN git_repos g ON g.id = r.repo_id
-		WHERE r.id = ?
-	`, id)
+		JOIN tasks t ON t.id = r.task_id
+		WHERE r.id = ? AND t.project_id = ?
+	`, id, project)
 	return scanTaskGitRef(row)
 }
 
 // ListTaskGitRefs lists git refs for one task ordered by created_at descending.
-func (s *Store) ListTaskGitRefs(ctx context.Context, taskID string) ([]models.TaskGitRef, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+taskGitRefColumns+`
-		FROM task_git_refs r
-		JOIN git_repos g ON g.id = r.repo_id
-		WHERE r.task_id = ?
-		ORDER BY r.created_at DESC
-	`, taskID)
+func (s *Store) ListTaskGitRefs(ctx context.Context, project, taskID string) ([]models.TaskGitRef, error) {
+	project = normalizeProject(project)
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if project == "" {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT `+taskGitRefColumns+`
+			FROM task_git_refs r
+			JOIN git_repos g ON g.id = r.repo_id
+			WHERE r.task_id = ?
+			ORDER BY r.created_at DESC
+		`, taskID)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT `+taskGitRefColumns+`
+			FROM task_git_refs r
+			JOIN git_repos g ON g.id = r.repo_id
+			JOIN tasks t ON t.id = r.task_id
+			WHERE r.task_id = ? AND t.project_id = ?
+			ORDER BY r.created_at DESC
+		`, taskID, project)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -151,14 +180,24 @@ func (s *Store) ListTaskGitRefs(ctx context.Context, taskID string) ([]models.Ta
 }
 
 // DeleteTaskGitRef deletes one task git reference row.
-func (s *Store) DeleteTaskGitRef(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM task_git_refs WHERE id = ?", id)
+func (s *Store) DeleteTaskGitRef(ctx context.Context, project, id string) error {
+	project = normalizeProject(project)
+	if project == "" {
+		_, err := s.db.ExecContext(ctx, "DELETE FROM task_git_refs WHERE id = ?", id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM task_git_refs
+		WHERE id = ?
+		AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+	`, id, project)
 	return err
 }
 
 // CloseTasksWithGitRefs closes tasks and adds one git ref annotation per task in a single transaction.
 // Duplicate annotations (same task/repo/relation/object/resolved_commit) are ignored.
-func (s *Store) CloseTasksWithGitRefs(ctx context.Context, ids []string, closedAt time.Time, refs []CloseTaskGitRefInput) (created int, err error) {
+func (s *Store) CloseTasksWithGitRefs(ctx context.Context, project string, ids []string, closedAt time.Time, refs []CloseTaskGitRefInput) (created int, err error) {
+	project = normalizeProject(project)
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
 		return 0, nil
@@ -187,7 +226,16 @@ func (s *Store) CloseTasksWithGitRefs(ctx context.Context, ids []string, closedA
 		}
 	}()
 
-	existsCount, err := countExistingTasks(ctx, tx, ids)
+	if project == "" {
+		project = projectFromTaskID(ids[0])
+	}
+	for _, id := range ids {
+		if projectFromTaskID(id) != project {
+			return 0, ErrProjectMismatch
+		}
+	}
+
+	existsCount, err := countExistingTasksInProject(ctx, tx, project, ids)
 	if err != nil {
 		return 0, err
 	}
@@ -195,11 +243,11 @@ func (s *Store) CloseTasksWithGitRefs(ctx context.Context, ids []string, closedA
 		return 0, ErrTaskNotFound
 	}
 
-	args := []any{string(models.StatusClosed), dbFormatTime(closedAt), dbFormatTime(closedAt)}
+	args := []any{string(models.StatusClosed), dbFormatTime(closedAt), dbFormatTime(closedAt), project}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE id IN (%s)", placeholders(len(ids)))
+	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE project_id = ? AND id IN (%s)", placeholders(len(ids)))
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return 0, err
 	}
@@ -406,6 +454,7 @@ func scanTaskGitRef(scanner interface {
 		return nil, err
 	}
 
+	ref.Project = projectFromTaskID(ref.TaskID)
 	ref.ResolvedCommit = resolvedCommit.String
 	ref.Note = note.String
 

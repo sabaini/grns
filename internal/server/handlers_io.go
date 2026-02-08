@@ -19,6 +19,10 @@ type importStreamOptions struct {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if !s.acquireLimiter(s.exportLimiter, w, r, "export") {
 		return
 	}
@@ -62,6 +66,10 @@ func (s *Server) logExportError(r *http.Request, stage string, offset int, taskI
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if !s.acquireLimiter(s.importLimiter, w, r, "import") {
 		return
 	}
@@ -95,6 +103,10 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleImportStream(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if !s.acquireLimiter(s.importLimiter, w, r, "import") {
 		return
 	}

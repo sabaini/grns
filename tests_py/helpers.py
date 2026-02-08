@@ -4,6 +4,34 @@ import urllib.request
 from pathlib import Path
 
 
+def _normalize_project(value: str) -> str:
+    project = (value or "").strip().lower()
+    if len(project) != 2 or not project.isalpha():
+        return "gr"
+    return project
+
+
+def scoped_api_path(env: dict[str, str], path: str) -> str:
+    """Map legacy /v1/* domain paths to project-scoped routes.
+
+    Global routes remain unchanged.
+    """
+    if not path.startswith("/"):
+        path = "/" + path
+
+    if path == "/health" or path.startswith("/v1/info") or path.startswith("/v1/admin/") or path == "/v1/admin":
+        return path
+
+    if path.startswith("/v1/projects/"):
+        return path
+
+    if path.startswith("/v1/"):
+        project = _normalize_project(env.get("GRNS_PROJECT_PREFIX", "gr"))
+        return f"/v1/projects/{project}{path[len('/v1'):]}"
+
+    return path
+
+
 def run_grns(env: dict[str, str], *args: str, check: bool = True) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         [env["GRNS_BIN"], *args],
@@ -25,7 +53,7 @@ def json_stdout(proc: subprocess.CompletedProcess):
 
 def api_post(env: dict[str, str], path: str, body: dict) -> dict:
     """POST JSON to the running server and return parsed response."""
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req) as resp:
@@ -34,14 +62,14 @@ def api_post(env: dict[str, str], path: str, body: dict) -> dict:
 
 def api_get(env: dict[str, str], path: str) -> dict:
     """GET from the running server and return parsed response."""
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     with urllib.request.urlopen(url) as resp:
         return json.loads(resp.read())
 
 
 def api_patch(env: dict[str, str], path: str, body: dict) -> dict:
     """PATCH JSON to the running server and return parsed response."""
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="PATCH", headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req) as resp:

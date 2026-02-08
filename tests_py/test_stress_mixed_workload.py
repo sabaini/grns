@@ -11,6 +11,8 @@ import urllib.request
 
 import pytest
 
+from tests_py.helpers import scoped_api_path
+
 pytestmark = pytest.mark.stress
 
 if os.getenv("GRNS_STRESS", "0") != "1":
@@ -44,7 +46,7 @@ def _p95(values_ms: list[float]) -> float:
 
 
 def _api_json_request(env: dict[str, str], method: str, path: str, body: dict | None = None):
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     data = None
     headers = {}
     if body is not None:
@@ -63,7 +65,7 @@ def _list_all_by_label(env: dict[str, str], label: str, limit: int = 250) -> lis
         chunk = _api_json_request(
             env,
             "GET",
-            f"/v1/tasks?label={label}&limit={limit}&offset={offset}",
+            f"/v1/projects/gr/tasks?label={label}&limit={limit}&offset={offset}",
         )
         if not chunk:
             break
@@ -159,7 +161,7 @@ def test_stress_mixed_workload_invariants(running_server):
         created = _api_json_request(
             env,
             "POST",
-            "/v1/tasks",
+            "/v1/projects/gr/tasks",
             {
                 "title": f"Stress seed {i}",
                 "labels": [run_label, "stress"],
@@ -197,7 +199,7 @@ def test_stress_mixed_workload_invariants(running_server):
                     created = _api_json_request(
                         env,
                         "POST",
-                        "/v1/tasks",
+                        "/v1/projects/gr/tasks",
                         {
                             "title": f"Stress task {worker_idx}-{n}",
                             "labels": [run_label, "stress"],
@@ -213,22 +215,22 @@ def test_stress_mixed_workload_invariants(running_server):
                         payload = {"priority": rng.randrange(0, 5)}
                     else:
                         payload = {"description": f"desc-{worker_idx}-{n}"}
-                    _api_json_request(env, "PATCH", f"/v1/tasks/{task_id}", payload)
+                    _api_json_request(env, "PATCH", f"/v1/projects/gr/tasks/{task_id}", payload)
 
                 elif op == "list":
-                    _api_json_request(env, "GET", f"/v1/tasks?label={run_label}&limit=80")
+                    _api_json_request(env, "GET", f"/v1/projects/gr/tasks?label={run_label}&limit=80")
 
                 elif op == "label":
                     task_id = pick_id(rng)
                     label = f"wk-{worker_idx % 4}"
                     if rng.random() < 0.65:
-                        _api_json_request(env, "POST", f"/v1/tasks/{task_id}/labels", {"labels": [label]})
+                        _api_json_request(env, "POST", f"/v1/projects/gr/tasks/{task_id}/labels", {"labels": [label]})
                     else:
-                        _api_json_request(env, "DELETE", f"/v1/tasks/{task_id}/labels", {"labels": [label]})
+                        _api_json_request(env, "DELETE", f"/v1/projects/gr/tasks/{task_id}/labels", {"labels": [label]})
 
                 else:  # toggle
                     task_id = pick_id(rng)
-                    path = "/v1/tasks/close" if rng.random() < 0.5 else "/v1/tasks/reopen"
+                    path = "/v1/projects/gr/tasks/close" if rng.random() < 0.5 else "/v1/projects/gr/tasks/reopen"
                     _api_json_request(env, "POST", path, {"ids": [task_id]})
 
             except urllib.error.HTTPError as exc:

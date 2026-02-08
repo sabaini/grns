@@ -65,14 +65,14 @@ _counter = _Counter()
 def test_created_at_immutable_across_updates(running_server, new_priority, new_type):
     """created_at never changes regardless of how many updates are applied."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "ts immutable"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "ts immutable"})
     original_created_at = created["created_at"]
     task_id = created["id"]
 
-    api_patch(env, f"/v1/tasks/{task_id}", {"priority": new_priority})
-    api_patch(env, f"/v1/tasks/{task_id}", {"type": new_type})
+    api_patch(env, f"/v1/projects/gr/tasks/{task_id}", {"priority": new_priority})
+    api_patch(env, f"/v1/projects/gr/tasks/{task_id}", {"type": new_type})
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["created_at"] == original_created_at
 
 
@@ -81,14 +81,14 @@ def test_created_at_immutable_across_updates(running_server, new_priority, new_t
 def test_updated_at_advances_on_mutation(running_server, new_priority):
     """updated_at is >= the previous value after a mutation."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "ts advance", "priority": 0})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "ts advance", "priority": 0})
     task_id = created["id"]
     original_updated = created["updated_at"]
 
     time.sleep(0.01)
-    api_patch(env, f"/v1/tasks/{task_id}", {"priority": new_priority})
+    api_patch(env, f"/v1/projects/gr/tasks/{task_id}", {"priority": new_priority})
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["updated_at"] >= original_updated
 
 
@@ -97,7 +97,7 @@ def test_updated_at_advances_on_mutation(running_server, new_priority):
 def test_closed_at_set_iff_status_closed(running_server, do_reopen):
     """closed_at is non-null when status=closed, null when reopened."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "closed_at invariant"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "closed_at invariant"})
     task_id = created["id"]
 
     # Initial: open, no closed_at.
@@ -105,13 +105,13 @@ def test_closed_at_set_iff_status_closed(running_server, do_reopen):
 
     # Close: closed_at should be set.
     run_grns(env, "close", task_id, "--json")
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["status"] == "closed"
     assert shown.get("closed_at") is not None
 
     if do_reopen:
         run_grns(env, "reopen", task_id, "--json")
-        shown = api_get(env, f"/v1/tasks/{task_id}")
+        shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
         assert shown["status"] == "open"
         assert shown.get("closed_at") is None
 
@@ -127,7 +127,7 @@ def test_close_reopen_state_machine(running_server, actions):
     """After any sequence of close/reopen attempts, the final state is
     consistent: status matches expectations and closed_at agrees."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "state machine"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "state machine"})
     task_id = created["id"]
 
     current_status = "open"
@@ -139,7 +139,7 @@ def test_close_reopen_state_machine(running_server, actions):
             elif action == "reopen":
                 current_status = "open"
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["status"] == current_status
     if current_status == "closed":
         assert shown.get("closed_at") is not None
@@ -157,10 +157,10 @@ def test_close_reopen_state_machine(running_server, actions):
 def test_custom_fields_roundtrip(running_server, custom):
     """Arbitrary JSON-compatible custom field maps survive create -> show."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "custom rt", "custom": custom})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "custom rt", "custom": custom})
     task_id = created["id"]
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown.get("custom") == custom
 
 
@@ -174,14 +174,14 @@ def test_custom_fields_roundtrip(running_server, custom):
 def test_dep_add_idempotent(running_server, data):
     """Adding the same dependency twice produces exactly one edge."""
     env = running_server
-    parent = api_post(env, "/v1/tasks", {"title": "dep parent"})
-    child = api_post(env, "/v1/tasks", {"title": "dep child"})
+    parent = api_post(env, "/v1/projects/gr/tasks", {"title": "dep parent"})
+    child = api_post(env, "/v1/projects/gr/tasks", {"title": "dep child"})
 
     n_adds = data.draw(st.integers(min_value=2, max_value=5))
     for _ in range(n_adds):
         run_grns(env, "dep", "add", child["id"], parent["id"], "--json")
 
-    shown = api_get(env, f"/v1/tasks/{child['id']}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{child['id']}")
     deps = shown.get("deps", [])
     parent_ids = [d["parent_id"] for d in deps]
     assert parent_ids.count(parent["id"]) == 1
@@ -205,7 +205,7 @@ def test_pagination_covers_all_tasks(running_server, n_tasks, page_size):
 
     created_ids = set()
     for i in range(n_tasks):
-        t = api_post(env, "/v1/tasks", {"title": f"pag {batch} {i}", "labels": [label]})
+        t = api_post(env, "/v1/projects/gr/tasks", {"title": f"pag {batch} {i}", "labels": [label]})
         created_ids.add(t["id"])
 
     seen_ids = []
@@ -244,7 +244,7 @@ def test_filter_results_match_all_criteria(running_server, data):
     for i in range(5):
         t = data.draw(valid_types())
         p = data.draw(valid_priorities())
-        api_post(env, "/v1/tasks", {
+        api_post(env, "/v1/projects/gr/tasks", {
             "title": f"fc {batch} {i}",
             "type": t,
             "priority": p,
@@ -279,15 +279,15 @@ def test_filter_results_match_all_criteria(running_server, data):
 def test_dash_prefixed_label_via_cli(running_server):
     """Labels starting with '-' work when --json is before positional args."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "dash label test"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "dash label test"})
     task_id = created["id"]
     run_grns(env, "label", "add", "--json", task_id, "-review")
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert "-review" in shown.get("labels", [])
 
     # Also verify removal works.
     run_grns(env, "label", "remove", "--json", task_id, "-review")
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert "-review" not in shown.get("labels", [])
 
 
@@ -299,14 +299,14 @@ def test_dash_prefixed_label_via_cli(running_server):
 def test_label_add_idempotent(running_server, initial, to_add):
     """Adding the same label multiple times produces exactly one copy."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "label idem", "labels": initial})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "label idem", "labels": initial})
     task_id = created["id"]
 
     # Add same label twice via CLI.
     run_grns(env, "label", "add", "--json", task_id, to_add)
     run_grns(env, "label", "add", "--json", task_id, to_add)
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     result_labels = shown.get("labels", [])
 
     expected = sorted(set(lbl.lower() for lbl in initial) | {to_add.lower()})
@@ -321,13 +321,13 @@ def test_label_remove_nonexistent_is_safe(running_server, labels):
     on_task = [labels[0]]
     absent = labels[1]
 
-    created = api_post(env, "/v1/tasks", {"title": "label rm safe", "labels": on_task})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "label rm safe", "labels": on_task})
     task_id = created["id"]
 
     # Remove a label that isn't on the task — should succeed.
     run_grns(env, "label", "remove", "--json", task_id, absent)
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     result_labels = shown.get("labels", [])
     assert labels[0].lower() in result_labels
 
@@ -340,14 +340,14 @@ def test_label_add_api_normalizes(running_server, labels):
     env = running_server
     assume(all(lbl.strip() for lbl in labels))
 
-    created = api_post(env, "/v1/tasks", {"title": "label api norm"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "label api norm"})
     task_id = created["id"]
 
     # Add labels via dedicated label endpoint.
     for lbl in labels:
-        api_post(env, f"/v1/tasks/{task_id}/labels", {"labels": [lbl]})
+        api_post(env, f"/v1/projects/gr/tasks/{task_id}/labels", {"labels": [lbl]})
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     result_labels = shown.get("labels", [])
     expected = sorted(set(lbl.lower() for lbl in labels))
     assert result_labels == expected
@@ -363,10 +363,10 @@ def test_label_add_api_normalizes(running_server, labels):
 def test_description_roundtrip(running_server, desc):
     """Description text survives create -> show with expected edge-whitespace normalization."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "desc rt", "description": desc})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "desc rt", "description": desc})
     task_id = created["id"]
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown.get("description", "") == desc.strip()
 
 
@@ -384,7 +384,7 @@ def test_list_ordered_by_updated_at_desc(running_server, n_tasks):
     label = f"or{batch}"
 
     for i in range(n_tasks):
-        api_post(env, "/v1/tasks", {"title": f"order {batch} {i}", "labels": [label]})
+        api_post(env, "/v1/projects/gr/tasks", {"title": f"order {batch} {i}", "labels": [label]})
         time.sleep(0.015)  # Ensure distinct timestamps.
 
     results = json_stdout(run_grns(env, "list", "--label", label, "--json"))
@@ -410,7 +410,7 @@ def test_batch_get_preserves_request_order(running_server, data):
 
     ids = []
     for i in range(n):
-        t = api_post(env, "/v1/tasks", {"title": f"batch order {i}"})
+        t = api_post(env, "/v1/projects/gr/tasks", {"title": f"batch order {i}"})
         ids.append(t["id"])
 
     shuffled = list(data.draw(st.permutations(ids)))
@@ -430,7 +430,7 @@ def test_batch_get_preserves_request_order(running_server, data):
 def test_auto_generated_id_matches_pattern(running_server, title, priority, task_type):
     """Every auto-generated task ID matches ^[a-z]{2}-[0-9a-z]{4}$."""
     env = running_server
-    created = api_post(env, "/v1/tasks", {
+    created = api_post(env, "/v1/projects/gr/tasks", {
         "title": title,
         "priority": priority,
         "type": task_type,
@@ -474,5 +474,5 @@ def test_import_same_data_twice(running_server, tmp_path, dedupe_mode):
     assert int(result2["created"]) == 0
 
     # Task still exists with correct title.
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["title"] == title

@@ -24,7 +24,7 @@ func TestCreateTask_UnknownJSONFieldsAreIgnored(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -44,7 +44,7 @@ func TestCreateTask_UnknownJSONFieldsAreIgnored(t *testing.T) {
 		t.Fatalf("unexpected title: %q", created.Title)
 	}
 
-	showReq := httptest.NewRequest(http.MethodGet, "/v1/tasks/"+created.ID, nil)
+	showReq := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks/"+created.ID, nil)
 	showW := httptest.NewRecorder()
 	srv.routes().ServeHTTP(showW, showReq)
 	if showW.Code != http.StatusOK {
@@ -64,7 +64,7 @@ func TestCreateTask_TrailingJSONRejected(t *testing.T) {
 	srv := newListTestServer(t)
 
 	payload := []byte(`{"title":"first"}{"title":"second"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(payload))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -81,7 +81,7 @@ func TestCreateTask_TrailingJSONRejected(t *testing.T) {
 		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidJSON, errResp.ErrorCode)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks", nil)
 	listW := httptest.NewRecorder()
 	srv.routes().ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK {

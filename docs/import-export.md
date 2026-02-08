@@ -19,10 +19,10 @@ Output is NDJSON — one JSON object per line. Each line is a full task record w
 Each line is a `TaskResponse`:
 
 ```json
-{"id":"gr-ab12","title":"Add auth flow","status":"open","type":"feature","priority":1,"description":"","spec_id":"","parent_id":"","assignee":"alice","notes":"","design":"","acceptance_criteria":"","source_repo":"","created_at":"2026-01-15T10:00:00Z","updated_at":"2026-01-15T12:00:00Z","labels":["auth","backend"],"deps":[{"parent_id":"gr-0001","type":"blocks"}]}
+{"project":"gr","id":"gr-ab12","title":"Add auth flow","status":"open","type":"feature","priority":1,"description":"","spec_id":"","parent_id":"","assignee":"alice","notes":"","design":"","acceptance_criteria":"","source_repo":"","created_at":"2026-01-15T10:00:00Z","updated_at":"2026-01-15T12:00:00Z","labels":["auth","backend"],"deps":[{"parent_id":"gr-0001","type":"blocks"}]}
 ```
 
-Fields included: `id`, `title`, `status`, `type`, `priority`, `description`, `spec_id`, `parent_id`, `assignee`, `notes`, `design`, `acceptance_criteria`, `source_repo`, `custom`, `created_at`, `updated_at`, `closed_at`, `labels`, `deps`.
+Fields included: `project`, `id`, `title`, `status`, `type`, `priority`, `description`, `spec_id`, `parent_id`, `assignee`, `notes`, `design`, `acceptance_criteria`, `source_repo`, `custom`, `created_at`, `updated_at`, `closed_at`, `labels`, `deps`.
 
 ## Import
 
@@ -47,8 +47,13 @@ grns import -i tasks.jsonl --atomic
 
 Each line in the JSONL file should be a task record. The minimum required field is `title`. If `id` is provided and already exists, the dedupe mode controls behavior.
 
+Import is project-scoped to your configured `project_prefix` (or explicit project route when calling HTTP directly):
+- if `id` is present, its prefix must match the target project
+- if `project` is present, it must match the target project
+- `parent_id`/dependency `parent_id` values must stay within the same project
+
 ```json
-{"id":"gr-ab12","title":"Add auth flow","status":"open","type":"feature","priority":1,"labels":["auth"],"deps":[{"parent_id":"gr-0001","type":"blocks"}]}
+{"project":"gr","id":"gr-ab12","title":"Add auth flow","status":"open","type":"feature","priority":1,"labels":["auth"],"deps":[{"parent_id":"gr-0001","type":"blocks"}]}
 ```
 
 ### Flags

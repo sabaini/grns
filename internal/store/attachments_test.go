@@ -66,7 +66,7 @@ func TestCreateGetListDeleteAttachment_RoundTrip(t *testing.T) {
 		t.Fatalf("create link attachment: %v", err)
 	}
 
-	gotManaged, err := st.GetAttachment(ctx, managed.ID)
+	gotManaged, err := st.GetAttachment(ctx, "gr", managed.ID)
 	if err != nil {
 		t.Fatalf("get managed attachment: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestCreateGetListDeleteAttachment_RoundTrip(t *testing.T) {
 		t.Fatalf("expected meta roundtrip, got %v", gotManaged.Meta)
 	}
 
-	list, err := st.ListAttachmentsByTask(ctx, task.ID)
+	list, err := st.ListAttachmentsByTask(ctx, "gr", task.ID)
 	if err != nil {
 		t.Fatalf("list attachments by task: %v", err)
 	}
@@ -94,11 +94,11 @@ func TestCreateGetListDeleteAttachment_RoundTrip(t *testing.T) {
 		t.Fatalf("expected created_at desc order [%s %s], got [%s %s]", link.ID, managed.ID, list[0].ID, list[1].ID)
 	}
 
-	if err := st.DeleteAttachment(ctx, managed.ID); err != nil {
+	if err := st.DeleteAttachment(ctx, "gr", managed.ID); err != nil {
 		t.Fatalf("delete managed attachment: %v", err)
 	}
 
-	deleted, err := st.GetAttachment(ctx, managed.ID)
+	deleted, err := st.GetAttachment(ctx, "gr", managed.ID)
 	if err != nil {
 		t.Fatalf("get deleted attachment: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestCreateGetListDeleteAttachment_RoundTrip(t *testing.T) {
 		t.Fatalf("expected nil attachment after delete, got %#v", deleted)
 	}
 
-	remaining, err := st.ListAttachmentsByTask(ctx, task.ID)
+	remaining, err := st.ListAttachmentsByTask(ctx, "gr", task.ID)
 	if err != nil {
 		t.Fatalf("list remaining attachments: %v", err)
 	}
@@ -187,6 +187,55 @@ func TestCreateManagedAttachmentWithBlob_RollsBackBlobOnAttachmentInsertError(t 
 	}
 	if blob != nil {
 		t.Fatalf("expected blob metadata rollback on attachment insert error, got %#v", blob)
+	}
+}
+
+func TestAttachmentProjectScopedByID(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, task := range []*models.Task{
+		{ID: "gr-ap01", Title: "gr task", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "xy-ap01", Title: "xy task", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+
+	xyAttachment := &models.Attachment{
+		ID:              "at-ap01",
+		TaskID:          "xy-ap01",
+		Kind:            string(models.AttachmentKindArtifact),
+		SourceType:      string(models.AttachmentSourceExternalURL),
+		ExternalURL:     "https://example.com/xy",
+		MediaTypeSource: string(models.MediaTypeSourceUnknown),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := st.CreateAttachment(ctx, xyAttachment); err != nil {
+		t.Fatalf("create xy attachment: %v", err)
+	}
+
+	got, err := st.GetAttachment(ctx, "gr", xyAttachment.ID)
+	if err != nil {
+		t.Fatalf("get attachment in wrong project: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil attachment for wrong project, got %#v", got)
+	}
+
+	if err := st.DeleteAttachment(ctx, "gr", xyAttachment.ID); err != nil {
+		t.Fatalf("delete attachment in wrong project: %v", err)
+	}
+
+	stillThere, err := st.GetAttachment(ctx, "xy", xyAttachment.ID)
+	if err != nil {
+		t.Fatalf("get attachment in owning project: %v", err)
+	}
+	if stillThere == nil {
+		t.Fatal("expected attachment to remain after wrong-project delete")
 	}
 }
 

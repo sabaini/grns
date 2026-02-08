@@ -25,6 +25,9 @@ type CleanupResult struct {
 // ErrTaskNotFound indicates no matching tasks were found for a mutation.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrProjectMismatch indicates resources belong to different projects.
+var ErrProjectMismatch = errors.New("project mismatch")
+
 // TaskCreateInput defines one task create operation with related labels and dependencies.
 type TaskCreateInput struct {
 	Task   *models.Task
@@ -54,25 +57,25 @@ type TaskServiceStore interface {
 	CreateTasks(ctx context.Context, tasks []TaskCreateInput) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	ListTasks(ctx context.Context, filter ListFilter) ([]models.Task, error)
-	ListReadyTasks(ctx context.Context, limit int) ([]models.Task, error)
-	ListStaleTasks(ctx context.Context, cutoff time.Time, statuses []string, limit int) ([]models.Task, error)
+	ListReadyTasks(ctx context.Context, project string, limit int) ([]models.Task, error)
+	ListStaleTasks(ctx context.Context, project string, cutoff time.Time, statuses []string, limit int) ([]models.Task, error)
 	AddLabels(ctx context.Context, id string, labels []string) error
 	RemoveLabels(ctx context.Context, id string, labels []string) error
 	ListLabels(ctx context.Context, id string) ([]string, error)
 	ListDependencies(ctx context.Context, id string) ([]models.Dependency, error)
 	ListLabelsForTasks(ctx context.Context, ids []string) (map[string][]string, error)
 	ListDependenciesForTasks(ctx context.Context, ids []string) (map[string][]models.Dependency, error)
-	CloseTasks(ctx context.Context, ids []string, closedAt time.Time) error
-	ReopenTasks(ctx context.Context, ids []string, reopenedAt time.Time) error
+	CloseTasks(ctx context.Context, project string, ids []string, closedAt time.Time) error
+	ReopenTasks(ctx context.Context, project string, ids []string, reopenedAt time.Time) error
 }
 
 // TaskStore abstracts task storage backends.
 type TaskStore interface {
 	TaskServiceStore
 	StoreInfo(ctx context.Context) (*StoreInfo, error)
-	ListAllLabels(ctx context.Context) ([]string, error)
-	DependencyTree(ctx context.Context, id string) ([]models.DepTreeNode, error)
-	CleanupClosedTasks(ctx context.Context, cutoff time.Time, dryRun bool) (*CleanupResult, error)
+	ListAllLabels(ctx context.Context, project string) ([]string, error)
+	DependencyTree(ctx context.Context, project string, id string) ([]models.DepTreeNode, error)
+	CleanupClosedTasks(ctx context.Context, project string, cutoff time.Time, dryRun bool) (*CleanupResult, error)
 }
 
 var _ ImportStore = (*Store)(nil)

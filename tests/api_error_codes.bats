@@ -6,7 +6,7 @@ load 'helpers_http.bash'
 
   run python3 -c '
 import json, os, sys, urllib.error, urllib.request
-url = os.environ["GRNS_API_URL"] + "/v1/tasks/invalid"
+url = os.environ["GRNS_API_URL"] + "/v1/projects/gr/tasks/invalid"
 try:
     urllib.request.urlopen(url)
     raise SystemExit("expected HTTP 400")
@@ -25,7 +25,7 @@ except urllib.error.HTTPError as e:
 
   run python3 -c '
 import json, os, urllib.error, urllib.request
-url = os.environ["GRNS_API_URL"] + "/v1/tasks/gr-zzzz"
+url = os.environ["GRNS_API_URL"] + "/v1/projects/gr/tasks/gr-zzzz"
 try:
     urllib.request.urlopen(url)
     raise SystemExit("expected HTTP 404")
@@ -47,7 +47,7 @@ except urllib.error.HTTPError as e:
 
   run python3 -c '
 import json, os, urllib.error, urllib.request
-url = os.environ["GRNS_API_URL"] + "/v1/tasks"
+url = os.environ["GRNS_API_URL"] + "/v1/projects/gr/tasks"
 payload = json.dumps({"id":"gr-cf01","title":"Duplicate"}).encode("utf-8")
 req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type":"application/json"})
 try:
@@ -74,7 +74,7 @@ base = os.environ["GRNS_API_URL"]
 
 # Unauthorized: no Authorization header
 try:
-    urllib.request.urlopen(base + "/v1/tasks")
+    urllib.request.urlopen(base + "/v1/projects/gr/tasks")
     raise SystemExit("expected HTTP 401")
 except urllib.error.HTTPError as e:
     body = e.read().decode("utf-8")
@@ -119,7 +119,7 @@ except urllib.error.HTTPError as e:
 import json, os, urllib.error, urllib.request
 base = os.environ["GRNS_API_URL"]
 payload = json.dumps({"tasks":[{"id":"gr-r429","title":"x","status":"open","type":"task","priority":2}]}).encode("utf-8")
-req = urllib.request.Request(base + "/v1/import", data=payload, method="POST", headers={"Content-Type":"application/json"})
+req = urllib.request.Request(base + "/v1/projects/gr/import", data=payload, method="POST", headers={"Content-Type":"application/json"})
 try:
     urllib.request.urlopen(req)
     raise SystemExit("expected HTTP 429")

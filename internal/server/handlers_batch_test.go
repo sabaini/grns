@@ -25,7 +25,7 @@ func TestHandleBatchCreateAllOrNothing(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/batch", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/batch", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -41,7 +41,7 @@ func TestHandleBatchCreateAllOrNothing(t *testing.T) {
 		t.Fatalf("expected error_code %d, got %d", ErrCodeTaskIDExists, errResp.ErrorCode)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks", nil)
 	listW := httptest.NewRecorder()
 	srv.routes().ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -66,7 +66,7 @@ func TestHandleBatchCreateSuccess(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/batch", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/batch", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -106,7 +106,7 @@ func TestHandleGetTasks(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/get", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/get", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -140,7 +140,7 @@ func TestHandleGetTasks_PreservesDuplicateIDs(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/get", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/get", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -173,7 +173,7 @@ func TestHandleBatchCreate_ForwardDependencyInBatch(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/batch", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/batch", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -196,7 +196,7 @@ func TestHandleCreateTask_MissingDependencyParentReturns400(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)

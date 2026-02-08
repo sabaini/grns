@@ -13,7 +13,7 @@ def test_concurrent_create_same_explicit_id_only_one_succeeds(running_server):
 
     def create_once(_idx: int):
         try:
-            created = api_post(env, "/v1/tasks", {"id": task_id, "title": "same id race"})
+            created = api_post(env, "/v1/projects/gr/tasks", {"id": task_id, "title": "same id race"})
             return "ok", created["id"]
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
@@ -33,25 +33,25 @@ def test_concurrent_create_same_explicit_id_only_one_succeeds(running_server):
     assert len(conflicts) == attempts - 1
     assert unexpected == []
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["id"] == task_id
 
 
 def test_concurrent_close_reopen_preserves_closed_at_invariant(running_server):
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "Concurrent toggle target"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "Concurrent toggle target"})
     task_id = created["id"]
 
     ops = ["close" if i % 2 == 0 else "reopen" for i in range(80)]
 
     def mutate(op: str):
-        path = "/v1/tasks/close" if op == "close" else "/v1/tasks/reopen"
+        path = "/v1/projects/gr/tasks/close" if op == "close" else "/v1/projects/gr/tasks/reopen"
         api_post(env, path, {"ids": [task_id]})
 
     with ThreadPoolExecutor(max_workers=12) as pool:
         list(pool.map(mutate, ops))
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["status"] in {"open", "closed"}
     if shown["status"] == "closed":
         assert shown.get("closed_at") is not None
@@ -62,7 +62,7 @@ def test_concurrent_close_reopen_preserves_closed_at_invariant(running_server):
 
 def test_concurrent_label_add_remove_keeps_labels_unique(running_server):
     env = running_server
-    created = api_post(env, "/v1/tasks", {"title": "Concurrent label target"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "Concurrent label target"})
     task_id = created["id"]
 
     label_pool = ["alpha", "beta", "gamma"]
@@ -77,7 +77,7 @@ def test_concurrent_label_add_remove_keeps_labels_unique(running_server):
     with ThreadPoolExecutor(max_workers=10) as pool:
         list(pool.map(mutate, range(90)))
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     labels = shown.get("labels", [])
 
     assert labels == sorted(labels)
@@ -101,14 +101,14 @@ def test_concurrent_create_and_list_visibility(running_server):
     def create_one(idx: int):
         created = api_post(
             env,
-            "/v1/tasks",
+            "/v1/projects/gr/tasks",
             {"title": f"Visibility task {idx}", "labels": [label]},
         )
         with lock:
             created_ids.add(created["id"])
 
     def list_one(_idx: int):
-        listed = api_get(env, f"/v1/tasks?label={label}&limit=500")
+        listed = api_get(env, f"/v1/projects/gr/tasks?label={label}&limit=500")
         ids = {item["id"] for item in listed}
         with lock:
             observed_ids.update(ids)
@@ -124,7 +124,7 @@ def test_concurrent_create_and_list_visibility(running_server):
         for future in as_completed(futures):
             future.result()
 
-    final_list = api_get(env, f"/v1/tasks?label={label}&limit=500")
+    final_list = api_get(env, f"/v1/projects/gr/tasks?label={label}&limit=500")
     final_ids = {task["id"] for task in final_list}
 
     assert len(created_ids) == create_count

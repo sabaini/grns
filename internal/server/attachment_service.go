@@ -29,6 +29,7 @@ type AttachmentService struct {
 	taskStore       store.TaskServiceStore
 	attachmentStore store.AttachmentStore
 	blobStore       blobstore.BlobStore
+	projectPrefix   string
 
 	allowedMediaTypes map[string]struct{}
 	rejectMismatch    bool
@@ -53,8 +54,8 @@ type BlobGCResult struct {
 }
 
 // NewAttachmentService constructs an AttachmentService.
-func NewAttachmentService(taskStore store.TaskServiceStore, attachmentStore store.AttachmentStore, blobStore blobstore.BlobStore) *AttachmentService {
-	svc := &AttachmentService{taskStore: taskStore, attachmentStore: attachmentStore, blobStore: blobStore}
+func NewAttachmentService(taskStore store.TaskServiceStore, attachmentStore store.AttachmentStore, blobStore blobstore.BlobStore, projectPrefix string) *AttachmentService {
+	svc := &AttachmentService{taskStore: taskStore, attachmentStore: attachmentStore, blobStore: blobStore, projectPrefix: projectPrefix}
 	svc.ConfigurePolicy(nil, rejectMediaTypeMismatch(), defaultBlobGCBatchSize)
 	if envAllowed := allowedAttachmentMediaTypes(); len(envAllowed) > 0 {
 		configured := make([]string, 0, len(envAllowed))
@@ -134,7 +135,7 @@ func (s *AttachmentService) CreateManagedAttachment(ctx context.Context, taskID 
 	if !validateBlobID(in.BlobID) {
 		return zero, badRequestCode(fmt.Errorf("invalid blob_id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(taskID); err != nil {
+	if err := s.ensureTaskExists(ctx, taskID); err != nil {
 		return zero, err
 	}
 
@@ -161,6 +162,7 @@ func (s *AttachmentService) CreateManagedAttachment(ctx context.Context, taskID 
 		return zero, err
 	}
 	attachment := &models.Attachment{
+		Project:         taskIDProjectPrefix(taskID),
 		ID:              id,
 		TaskID:          taskID,
 		Kind:            string(kind),
@@ -183,7 +185,7 @@ func (s *AttachmentService) CreateManagedAttachment(ctx context.Context, taskID 
 		return zero, err
 	}
 
-	stored, err := s.attachmentStore.GetAttachment(ctx, attachment.ID)
+	stored, err := s.attachmentStore.GetAttachment(ctx, taskIDProjectPrefix(taskID), attachment.ID)
 	if err != nil {
 		return zero, err
 	}
@@ -208,7 +210,7 @@ func (s *AttachmentService) CreateManagedAttachmentFromReader(ctx context.Contex
 	if !validateID(taskID) {
 		return zero, badRequestCode(fmt.Errorf("invalid task_id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(taskID); err != nil {
+	if err := s.ensureTaskExists(ctx, taskID); err != nil {
 		return zero, err
 	}
 
@@ -235,6 +237,7 @@ func (s *AttachmentService) CreateManagedAttachmentFromReader(ctx context.Contex
 		return zero, err
 	}
 	attachment := &models.Attachment{
+		Project:         taskIDProjectPrefix(taskID),
 		ID:              id,
 		TaskID:          taskID,
 		Kind:            string(kind),
@@ -268,7 +271,7 @@ func (s *AttachmentService) CreateManagedAttachmentFromReader(ctx context.Contex
 		return zero, err
 	}
 
-	stored, err := s.attachmentStore.GetAttachment(ctx, attachment.ID)
+	stored, err := s.attachmentStore.GetAttachment(ctx, taskIDProjectPrefix(taskID), attachment.ID)
 	if err != nil {
 		return zero, err
 	}
@@ -289,7 +292,7 @@ func (s *AttachmentService) CreateLinkAttachment(ctx context.Context, taskID str
 	if !validateID(taskID) {
 		return zero, badRequestCode(fmt.Errorf("invalid task_id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(taskID); err != nil {
+	if err := s.ensureTaskExists(ctx, taskID); err != nil {
 		return zero, err
 	}
 
@@ -349,6 +352,7 @@ func (s *AttachmentService) CreateLinkAttachment(ctx context.Context, taskID str
 		return zero, err
 	}
 	attachment := &models.Attachment{
+		Project:         taskIDProjectPrefix(taskID),
 		ID:              id,
 		TaskID:          taskID,
 		Kind:            string(kind),
@@ -372,7 +376,7 @@ func (s *AttachmentService) CreateLinkAttachment(ctx context.Context, taskID str
 		return zero, err
 	}
 
-	stored, err := s.attachmentStore.GetAttachment(ctx, attachment.ID)
+	stored, err := s.attachmentStore.GetAttachment(ctx, taskIDProjectPrefix(taskID), attachment.ID)
 	if err != nil {
 		return zero, err
 	}
@@ -392,10 +396,17 @@ func (s *AttachmentService) ListTaskAttachments(ctx context.Context, taskID stri
 	if !validateID(taskID) {
 		return nil, badRequestCode(fmt.Errorf("invalid task_id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(taskID); err != nil {
+	project, err := s.project(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return s.attachmentStore.ListAttachmentsByTask(ctx, taskID)
+	if !taskIDBelongsToProject(taskID, project) {
+		return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+	if err := s.ensureTaskExists(ctx, taskID); err != nil {
+		return nil, err
+	}
+	return s.attachmentStore.ListAttachmentsByTask(ctx, project, taskID)
 }
 
 // GetAttachment returns one attachment by id.
@@ -410,7 +421,12 @@ func (s *AttachmentService) GetAttachment(ctx context.Context, id string) (model
 		return zero, badRequestCode(fmt.Errorf("invalid attachment id"), ErrCodeInvalidID)
 	}
 
-	attachment, err := s.attachmentStore.GetAttachment(ctx, id)
+	project, err := s.project(ctx)
+	if err != nil {
+		return zero, err
+	}
+
+	attachment, err := s.attachmentStore.GetAttachment(ctx, project, id)
 	if err != nil {
 		return zero, err
 	}
@@ -431,14 +447,19 @@ func (s *AttachmentService) DeleteAttachment(ctx context.Context, id string) err
 		return badRequestCode(fmt.Errorf("invalid attachment id"), ErrCodeInvalidID)
 	}
 
-	attachment, err := s.attachmentStore.GetAttachment(ctx, id)
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
+
+	attachment, err := s.attachmentStore.GetAttachment(ctx, project, id)
 	if err != nil {
 		return err
 	}
 	if attachment == nil {
 		return notFoundCode(fmt.Errorf("attachment not found"), ErrCodeAttachmentNotFound)
 	}
-	return s.attachmentStore.DeleteAttachment(ctx, id)
+	return s.attachmentStore.DeleteAttachment(ctx, project, id)
 }
 
 // OpenAttachmentContent opens the stream for a managed attachment.
@@ -451,7 +472,12 @@ func (s *AttachmentService) OpenAttachmentContent(ctx context.Context, attachmen
 		return nil, badRequestCode(fmt.Errorf("invalid attachment id"), ErrCodeInvalidID)
 	}
 
-	attachment, err := s.attachmentStore.GetAttachment(ctx, attachmentID)
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	attachment, err := s.attachmentStore.GetAttachment(ctx, project, attachmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +574,15 @@ func (s *AttachmentService) GCBlobs(ctx context.Context, batchSize int, apply bo
 	}
 }
 
-func (s *AttachmentService) ensureTaskExists(id string) error {
+func (s *AttachmentService) ensureTaskExists(ctx context.Context, id string) error {
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
+	if !taskIDBelongsToProject(id, project) {
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+
 	exists, err := s.taskStore.TaskExists(id)
 	if err != nil {
 		return err
@@ -559,9 +593,16 @@ func (s *AttachmentService) ensureTaskExists(id string) error {
 	return nil
 }
 
+func (s *AttachmentService) project(ctx context.Context) (string, error) {
+	if project, ok := projectFromContext(ctx); ok {
+		return project, nil
+	}
+	return normalizePrefix(s.projectPrefix)
+}
+
 func (s *AttachmentService) nextAttachmentID(ctx context.Context) (string, error) {
 	exists := func(id string) (bool, error) {
-		attachment, err := s.attachmentStore.GetAttachment(ctx, id)
+		attachment, err := s.attachmentStore.GetAttachment(ctx, "", id)
 		if err != nil {
 			return false, err
 		}

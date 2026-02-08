@@ -31,6 +31,7 @@ func (b *listQueryBuilder) buildSelect() {
 }
 
 func (b *listQueryBuilder) buildWhere() {
+	b.appendProject()
 	b.appendStatuses()
 	b.appendTypes()
 	b.appendPriority()
@@ -75,6 +76,14 @@ func (b *listQueryBuilder) buildPagination() {
 		b.query += " OFFSET ?"
 		b.args = append(b.args, b.filter.Offset)
 	}
+}
+
+func (b *listQueryBuilder) appendProject() {
+	if b.filter.Project == "" {
+		return
+	}
+	b.where = append(b.where, "tasks.project_id = ?")
+	b.args = append(b.args, normalizeProject(b.filter.Project))
 }
 
 func (b *listQueryBuilder) appendStatuses() {

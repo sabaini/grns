@@ -4,6 +4,7 @@ import "time"
 
 // Task represents a single task in grns.
 type Task struct {
+	Project            string         `json:"project,omitempty"`
 	ID                 string         `json:"id"`
 	Title              string         `json:"title"`
 	Status             string         `json:"status"`

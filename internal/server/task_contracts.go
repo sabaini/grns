@@ -8,6 +8,7 @@ import (
 
 // taskListFilter is the service-layer query DTO.
 type taskListFilter struct {
+	Project          string
 	Statuses         []string
 	Types            []string
 	Priority         *int
@@ -38,6 +39,7 @@ type taskListFilter struct {
 
 func (f taskListFilter) toStoreListFilter() store.ListFilter {
 	return store.ListFilter{
+		Project:          f.Project,
 		Statuses:         f.Statuses,
 		Types:            f.Types,
 		Priority:         f.Priority,

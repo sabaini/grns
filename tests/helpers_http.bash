@@ -45,7 +45,7 @@ ready = os.environ["READY_FILE"]
 hold = float(os.environ.get("HOLD_SECONDS", "3"))
 
 conn = http.client.HTTPConnection(base.hostname, base.port, timeout=10)
-conn.putrequest("POST", "/v1/import/stream")
+conn.putrequest("POST", "/v1/projects/gr/import/stream")
 conn.putheader("Content-Type", "application/x-ndjson")
 conn.putheader("Content-Length", "100000")
 conn.endheaders()

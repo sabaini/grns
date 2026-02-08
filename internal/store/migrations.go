@@ -225,6 +225,33 @@ CREATE INDEX IF NOT EXISTS idx_task_git_refs_repo_object ON task_git_refs(repo_i
 CREATE INDEX IF NOT EXISTS idx_task_git_refs_relation ON task_git_refs(relation);
 `,
 	},
+	{
+		Version:     7,
+		Description: "projects: add explicit project ownership metadata for tasks",
+		SQL: `
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (length(id) = 2 AND lower(id) = id AND id GLOB '[a-z][a-z]')
+);
+
+ALTER TABLE tasks ADD COLUMN project_id TEXT;
+
+UPDATE tasks
+SET project_id = lower(substr(id, 1, 2))
+WHERE project_id IS NULL OR trim(project_id) = '';
+
+INSERT OR IGNORE INTO projects (id, created_at, updated_at)
+SELECT DISTINCT project_id, datetime('now'), datetime('now')
+FROM tasks
+WHERE project_id IS NOT NULL AND project_id GLOB '[a-z][a-z]';
+
+CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_updated_desc ON tasks(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_status_updated_desc ON tasks(project_id, status, updated_at DESC);
+`,
+	},
 }
 
 const migrationsTableSQL = `

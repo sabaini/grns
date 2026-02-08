@@ -46,7 +46,7 @@ func TestAcquireLimiterReturnsStructured429(t *testing.T) {
 	limiter := make(chan struct{}, 1)
 	limiter <- struct{}{}
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks", nil)
 	w := httptest.NewRecorder()
 	ok := srv.acquireLimiter(limiter, w, req, "search")
 	if ok {
@@ -78,7 +78,7 @@ func TestWithAuth(t *testing.T) {
 		})
 		handler := srv.withAuth(next)
 
-		req := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+		req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusUnauthorized {
@@ -105,7 +105,7 @@ func TestWithAuth(t *testing.T) {
 		})
 		handler := srv.withAuth(next)
 
-		req := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+		req := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks", nil)
 		req.Header.Set("Authorization", "Bearer token")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)

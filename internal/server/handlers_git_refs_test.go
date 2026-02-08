@@ -41,7 +41,7 @@ func TestTaskGitRefCRUDHandlers(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-g001/git-refs", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-g001/git-refs", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -57,7 +57,7 @@ func TestTaskGitRefCRUDHandlers(t *testing.T) {
 		t.Fatalf("unexpected created ref: %#v", created)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/tasks/gr-g001/git-refs", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks/gr-g001/git-refs", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -71,21 +71,21 @@ func TestTaskGitRefCRUDHandlers(t *testing.T) {
 		t.Fatalf("unexpected refs list: %#v", list)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/git-refs/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/git-refs/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/v1/git-refs/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodDelete, "/v1/projects/gr/git-refs/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/git-refs/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/git-refs/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -124,7 +124,7 @@ func TestCloseWithCommitCreatesClosedByGitRefs(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/close", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/close", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -140,7 +140,7 @@ func TestCloseWithCommitCreatesClosedByGitRefs(t *testing.T) {
 		t.Fatalf("expected annotated=1, got %#v", closeResp["annotated"])
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/tasks/gr-g002/git-refs", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks/gr-g002/git-refs", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -166,7 +166,7 @@ func TestCloseWithRepoRequiresCommit(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/close", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/close", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -200,7 +200,7 @@ func TestCloseWithCommitWithoutRepoContextDoesNotCloseTask(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/close", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/close", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -216,7 +216,7 @@ func TestCloseWithCommitWithoutRepoContextDoesNotCloseTask(t *testing.T) {
 		t.Fatalf("expected error_code %d, got %d", ErrCodeMissingRequired, errResp.ErrorCode)
 	}
 
-	showReq := httptest.NewRequest(http.MethodGet, "/v1/tasks/gr-g003", nil)
+	showReq := httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks/gr-g003", nil)
 	showW := httptest.NewRecorder()
 	srv.routes().ServeHTTP(showW, showReq)
 	if showW.Code != http.StatusOK {

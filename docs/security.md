@@ -59,8 +59,8 @@ JSON payloads are size-limited via `http.MaxBytesReader`.
 
 Current limits:
 - default JSON endpoints: 1 MiB
-- `/v1/tasks/batch`: 8 MiB
-- `/v1/import`: 64 MiB
+- `/v1/projects/{project}/tasks/batch`: 8 MiB
+- `/v1/projects/{project}/import`: 64 MiB
 
 ### Concurrency limiting for expensive endpoints
 

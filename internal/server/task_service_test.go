@@ -274,6 +274,65 @@ func TestTaskServiceImportSemantics(t *testing.T) {
 	})
 }
 
+func TestTaskServiceProjectScopedImportExport(t *testing.T) {
+	svc, st := newTaskServiceForTest(t)
+	now := time.Now().UTC()
+
+	for _, task := range []*models.Task{
+		{ID: "gr-pe11", Title: "gr export", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "xy-pe11", Title: "xy export", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.CreateTask(context.Background(), task, nil, nil); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+
+	ctxGR := contextWithProject(context.Background(), "gr")
+	ctxXY := contextWithProject(context.Background(), "xy")
+
+	records, err := svc.ExportPage(ctxGR, 100, 0)
+	if err != nil {
+		t.Fatalf("export page gr: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "gr-pe11" {
+		t.Fatalf("expected only gr-pe11 in gr export, got %+v", records)
+	}
+
+	records, err = svc.ExportPage(ctxXY, 100, 0)
+	if err != nil {
+		t.Fatalf("export page xy: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "xy-pe11" {
+		t.Fatalf("expected only xy-pe11 in xy export, got %+v", records)
+	}
+
+	_, err = svc.Import(ctxXY, api.ImportRequest{Tasks: []api.TaskImportRecord{{Task: models.Task{ID: "gr-im11", Title: "wrong project", Status: "open", Type: "task", Priority: 2}}}})
+	if httpStatusFromError(err) != 400 {
+		t.Fatalf("expected 400 for cross-project import id, got status=%d err=%v", httpStatusFromError(err), err)
+	}
+
+	_, err = svc.Import(ctxXY, api.ImportRequest{Tasks: []api.TaskImportRecord{{Task: models.Task{Project: "gr", ID: "xy-im11", Title: "mismatch project field", Status: "open", Type: "task", Priority: 2}}}})
+	if httpStatusFromError(err) != 400 {
+		t.Fatalf("expected 400 for project field mismatch, got status=%d err=%v", httpStatusFromError(err), err)
+	}
+
+	resp, err := svc.Import(ctxXY, api.ImportRequest{Tasks: []api.TaskImportRecord{{Task: models.Task{ID: "xy-im12", Title: "xy import", Status: "open", Type: "task", Priority: 2}}}})
+	if err != nil {
+		t.Fatalf("import xy task: %v", err)
+	}
+	if resp.Created != 1 {
+		t.Fatalf("expected created=1, got %d", resp.Created)
+	}
+
+	got, err := st.GetTask(context.Background(), "xy-im12")
+	if err != nil {
+		t.Fatalf("get imported xy task: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected xy-im12 to be persisted")
+	}
+}
+
 func newTaskServiceForTest(t *testing.T) (*TaskService, *store.Store) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "task_service_test.db")

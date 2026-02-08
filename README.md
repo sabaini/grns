@@ -107,7 +107,7 @@ Config files (TOML):
 - Project: `.grns.toml` in current workspace (**loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`**)
 
 Supported config keys:
-- `project_prefix` (default: `gr`)
+- `project_prefix` (default: `gr`; used as `{project}` for `/v1/projects/{project}/...` API routes)
 - `api_url` (default: `http://127.0.0.1:7333`)
 - `db_path` (default: `.grns.db` in workspace)
 - `attachments.max_upload_bytes` (default: `104857600`)
@@ -195,7 +195,7 @@ grns import -i tasks.jsonl --stream   # streaming NDJSON import (recommended for
 grns export [-o tasks.jsonl]
 
 grns info
-grns admin cleanup --older-than N [--dry-run|--force]
+grns admin cleanup --older-than N [--dry-run|--force] [--project <pp>]
 grns admin gc-blobs [--dry-run|--apply] [--batch-size N]
 grns migrate [--inspect|--dry-run]
 grns config get <key>

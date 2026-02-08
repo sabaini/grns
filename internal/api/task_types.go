@@ -55,8 +55,9 @@ type DepTreeResponse struct {
 
 // CleanupRequest defines the payload for admin cleanup.
 type CleanupRequest struct {
-	OlderThanDays int  `json:"older_than_days"`
-	DryRun        bool `json:"dry_run"`
+	OlderThanDays int    `json:"older_than_days"`
+	DryRun        bool   `json:"dry_run"`
+	Project       string `json:"project,omitempty"`
 }
 
 // CleanupResponse is the response from POST /v1/admin/cleanup.

@@ -14,6 +14,10 @@ import (
 )
 
 func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return
@@ -92,6 +96,10 @@ func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleCreateTaskAttachmentLink(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return
@@ -127,6 +135,10 @@ func (s *Server) handleCreateTaskAttachmentLink(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleListTaskAttachments(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return
@@ -150,6 +162,10 @@ func (s *Server) handleListTaskAttachments(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return
@@ -171,6 +187,10 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return
@@ -200,6 +220,10 @@ func (s *Server) handleGetAttachmentContent(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.attachmentService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("attachments are not configured")))
 		return

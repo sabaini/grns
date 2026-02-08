@@ -11,7 +11,7 @@ CLI (cmd/grns) → HTTP (api.Client) → Server (internal/server) → Store (int
 ```
 
 - **CLI** auto-spawns a local server process if none is running (`client.go`).
-- **Server** uses Go 1.22+ `ServeMux` patterns (`"GET /v1/tasks/{id}"`). One handler per route+method.
+- **Server** uses Go 1.22+ `ServeMux` patterns (`"GET /v1/projects/{project}/tasks/{id}"`). One handler per route+method.
 - **TaskService** (`task_service.go`) owns validation and business logic. Handlers must not call store directly.
 - **TaskStore** interface (`store/interface.go`) abstracts persistence. The only implementation is SQLite.
 - **Migrations** run automatically on `store.Open()`. Add new migrations to `var migrations` in `migrations.go`.
@@ -19,10 +19,27 @@ CLI (cmd/grns) → HTTP (api.Client) → Server (internal/server) → Store (int
 ## Build & Test
 
 ```
-just build              # build to bin/grns (version via ldflags)
-just test               # go test ./...
-just test-integration   # build + bats tests/
-just lint               # golangci-lint
+just build                  # build to bin/grns (version via ldflags)
+just test                   # go test ./...
+just tests-all              # run ALL checks: tidy, fmt, contracts, unit, coverage, integration, py, hypothesis
+just test-contracts         # go test ./cmd/grns -run '^TestReadme' (readme contract tests)
+just tidy-check             # go mod tidy -diff (verify go.mod/go.sum are tidy)
+just fmt                    # gofmt -w on all .go files
+just fmt-check              # verify all .go files are formatted
+just test-integration       # build + bats tests/
+just test-smoke             # build + bats subset (autospawn, create_show, admin_cleanup)
+just test-py                # build + uv run pytest tests_py
+just test-py-concurrency    # build + pytest concurrency & stress tests
+just test-py-stress         # build + GRNS_STRESS=1 pytest stress mixed workload
+just test-py-hypothesis     # build + uv run pytest hypothesis tests
+just test-py-perf           # build + GRNS_PYTEST_PERF=1 pytest perf-marked tests
+just bench-go-perf          # go benchmark: BenchmarkTaskService
+just test-go-perf           # GRNS_PERF_ENFORCE=1 go test performance budgets
+just test-coverage-critical # ./tests/ci/check_critical_coverage.sh
+just compare-stress <b> <c> # compare two stress-test summary files
+just lint                   # golangci-lint run ./...
+just clean                  # rm -rf bin/
+just install                # go install with ldflags
 ```
 
 Kill stale servers before integration tests: `pkill -f "grns srv"`.

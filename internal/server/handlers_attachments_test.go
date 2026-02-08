@@ -32,7 +32,7 @@ func TestAttachmentLinkCRUDHandlers(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-at01/attachments/link", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-at01/attachments/link", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -54,7 +54,7 @@ func TestAttachmentLinkCRUDHandlers(t *testing.T) {
 		t.Fatalf("expected normalized deduped labels [doc], got %#v", created.Labels)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/tasks/gr-at01/attachments", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/tasks/gr-at01/attachments", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -68,21 +68,21 @@ func TestAttachmentLinkCRUDHandlers(t *testing.T) {
 		t.Fatalf("expected 1 attachment, got %d", len(list))
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/attachments/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/v1/attachments/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodDelete, "/v1/projects/gr/attachments/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/attachments/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -117,7 +117,7 @@ func TestAttachmentManagedUploadHandler(t *testing.T) {
 		t.Fatalf("close multipart writer: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-am01/attachments", body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-am01/attachments", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -173,7 +173,7 @@ func TestAttachmentContentManaged(t *testing.T) {
 		t.Fatalf("close multipart writer: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-ac01/attachments", body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-ac01/attachments", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -186,7 +186,7 @@ func TestAttachmentContentManaged(t *testing.T) {
 		t.Fatalf("decode attachment: %v", err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID+"/content", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/attachments/"+created.ID+"/content", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -210,7 +210,7 @@ func TestAttachmentContentNonManagedRejected(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-ac02/attachments/link", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-ac02/attachments/link", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -222,7 +222,7 @@ func TestAttachmentContentNonManagedRejected(t *testing.T) {
 		t.Fatalf("decode attachment: %v", err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID+"/content", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/projects/gr/attachments/"+created.ID+"/content", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -256,7 +256,7 @@ func TestAttachmentBlobGCEndToEnd(t *testing.T) {
 		t.Fatalf("close multipart writer: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-gc01/attachments", body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-gc01/attachments", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -269,7 +269,7 @@ func TestAttachmentBlobGCEndToEnd(t *testing.T) {
 		t.Fatalf("decode attachment: %v", err)
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/v1/attachments/"+created.ID, nil)
+	req = httptest.NewRequest(http.MethodDelete, "/v1/projects/gr/attachments/"+created.ID, nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -331,7 +331,7 @@ func TestHandleCreateTaskAttachment_RequestTooLarge_ReturnsStructured1002(t *tes
 		strings.NewReader(trailer),
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-lg11/attachments", payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/gr/tasks/gr-lg11/attachments", payload)
 	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)

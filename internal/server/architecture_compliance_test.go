@@ -193,10 +193,7 @@ func isMutationMethod(method string) bool {
 }
 
 func isTaskMutationPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/tasks") ||
-		strings.HasPrefix(path, "/v1/git-refs") ||
-		strings.HasPrefix(path, "/v1/deps") ||
-		strings.HasPrefix(path, "/v1/import")
+	return strings.HasPrefix(path, "/v1/projects/")
 }
 
 func isServerReceiver(recv *ast.FieldList) bool {

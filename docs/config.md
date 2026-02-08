@@ -11,7 +11,7 @@ Grns reads config from TOML and supports runtime overrides via environment varia
 ## Supported keys
 
 Top-level keys:
-- `project_prefix` (default: `gr`)
+- `project_prefix` (default: `gr`; used as `{project}` for `/v1/projects/{project}/...` API routes)
 - `api_url` (default: `http://127.0.0.1:7333`)
 - `db_path` (default: `.grns.db` in workspace)
 

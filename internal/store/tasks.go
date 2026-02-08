@@ -21,6 +21,7 @@ var readyStatuses = models.ReadyTaskStatusStrings()
 var staleExcludedStatuses = models.StaleDefaultExcludedStatusStrings()
 
 type ListFilter struct {
+	Project          string
 	Statuses         []string
 	Types            []string
 	Priority         *int
@@ -92,14 +93,20 @@ func (s *Store) CreateTasks(ctx context.Context, tasks []TaskCreateInput) (err e
 }
 
 func insertTaskRow(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	projectID := projectFromTaskID(task.ID)
+	if projectID == "" {
+		return fmt.Errorf("invalid task id")
+	}
+
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, title, status, type, priority, description, spec_id, parent_id,
+			id, project_id, title, status, type, priority, description, spec_id, parent_id,
 			assignee, notes, design, acceptance_criteria, source_repo,
 			created_at, updated_at, closed_at, custom
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.ID,
+		projectID,
 		task.Title,
 		task.Status,
 		task.Type,
@@ -122,10 +129,14 @@ func insertTaskRow(ctx context.Context, tx *sql.Tx, task *models.Task) error {
 
 // GetTask returns a task by id.
 func (s *Store) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	project := projectFromTaskID(id)
+	if project == "" {
+		return nil, nil
+	}
 	row := s.db.QueryRowContext(ctx, `
 		SELECT `+taskColumns+`
-		FROM tasks WHERE id = ?
-	`, id)
+		FROM tasks WHERE id = ? AND project_id = ?
+	`, id, project)
 	return scanTask(row)
 }
 
@@ -204,8 +215,13 @@ func updateTaskExec(ctx context.Context, execer interface {
 	set = append(set, "updated_at = ?")
 	args = append(args, dbFormatTime(update.UpdatedAt))
 
-	args = append(args, id)
-	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ?", strings.Join(set, ", "))
+	project := projectFromTaskID(id)
+	if project == "" {
+		return fmt.Errorf("invalid task id")
+	}
+
+	args = append(args, id, project)
+	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ? AND project_id = ?", strings.Join(set, ", "))
 	_, err := execer.ExecContext(ctx, query, args...)
 	return err
 }
@@ -240,21 +256,25 @@ func (s *Store) ListTasks(ctx context.Context, filter ListFilter) ([]models.Task
 }
 
 // ListReadyTasks returns tasks with no open blockers.
-func (s *Store) ListReadyTasks(ctx context.Context, limit int) ([]models.Task, error) {
-	args := make([]any, 0, len(readyStatuses)*2+2)
+func (s *Store) ListReadyTasks(ctx context.Context, project string, limit int) ([]models.Task, error) {
+	project = normalizeProject(project)
+	args := make([]any, 0, len(readyStatuses)*2+4)
 	query := fmt.Sprintf(`
 		SELECT `+taskColumns+`
 		FROM tasks t
-		WHERE t.status IN (%s)
+		WHERE t.project_id = ?
+		AND t.status IN (%s)
 		AND NOT EXISTS (
 			SELECT 1 FROM task_deps d
 			JOIN tasks p ON p.id = d.parent_id
 			WHERE d.child_id = t.id
+			AND p.project_id = t.project_id
 			AND d.type = ?
 			AND p.status IN (%s)
 		)
 		ORDER BY updated_at DESC
 	`, placeholders(len(readyStatuses)), placeholders(len(readyStatuses)))
+	args = append(args, project)
 	for _, status := range readyStatuses {
 		args = append(args, status)
 	}
@@ -285,9 +305,10 @@ func (s *Store) ListReadyTasks(ctx context.Context, limit int) ([]models.Task, e
 }
 
 // ListStaleTasks returns tasks not updated since cutoff.
-func (s *Store) ListStaleTasks(ctx context.Context, cutoff time.Time, statuses []string, limit int) ([]models.Task, error) {
-	args := []any{dbFormatTime(cutoff)}
-	where := []string{"updated_at < ?"}
+func (s *Store) ListStaleTasks(ctx context.Context, project string, cutoff time.Time, statuses []string, limit int) ([]models.Task, error) {
+	project = normalizeProject(project)
+	args := []any{project, dbFormatTime(cutoff)}
+	where := []string{"project_id = ?", "updated_at < ?"}
 
 	if len(statuses) > 0 {
 		where = append(where, fmt.Sprintf("status IN (%s)", placeholders(len(statuses))))
@@ -372,9 +393,16 @@ func (s *Store) ListLabels(ctx context.Context, id string) ([]string, error) {
 	return labels, rows.Err()
 }
 
-// ListAllLabels returns all labels in the database.
-func (s *Store) ListAllLabels(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT label FROM task_labels ORDER BY label ASC")
+// ListAllLabels returns all labels in one project.
+func (s *Store) ListAllLabels(ctx context.Context, project string) ([]string, error) {
+	project = normalizeProject(project)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT l.label
+		FROM task_labels l
+		JOIN tasks t ON t.id = l.task_id
+		WHERE t.project_id = ?
+		ORDER BY l.label ASC
+	`, project)
 	if err != nil {
 		return nil, err
 	}
@@ -399,6 +427,9 @@ func (s *Store) AddDependency(ctx context.Context, childID, parentID, depType st
 func addDependencyExec(ctx context.Context, execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, childID, parentID, depType string) error {
+	if !sameTaskProject(childID, parentID) {
+		return ErrProjectMismatch
+	}
 	_, err := execer.ExecContext(ctx, "INSERT OR IGNORE INTO task_deps (child_id, parent_id, type) VALUES (?, ?, ?)", childID, parentID, depType)
 	return err
 }
@@ -524,7 +555,8 @@ func removeDependenciesExec(ctx context.Context, execer interface {
 }
 
 // CloseTasks closes tasks and sets closed_at.
-func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time) (err error) {
+func (s *Store) CloseTasks(ctx context.Context, project string, ids []string, closedAt time.Time) (err error) {
+	project = normalizeProject(project)
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
 		return nil
@@ -540,7 +572,7 @@ func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time
 		}
 	}()
 
-	existsCount, err := countExistingTasks(ctx, tx, ids)
+	existsCount, err := countExistingTasksInProject(ctx, tx, project, ids)
 	if err != nil {
 		return err
 	}
@@ -548,11 +580,11 @@ func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time
 		return ErrTaskNotFound
 	}
 
-	args := []any{string(models.StatusClosed), dbFormatTime(closedAt), dbFormatTime(closedAt)}
+	args := []any{string(models.StatusClosed), dbFormatTime(closedAt), dbFormatTime(closedAt), project}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE id IN (%s)", placeholders(len(ids)))
+	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE project_id = ? AND id IN (%s)", placeholders(len(ids)))
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
@@ -560,7 +592,8 @@ func (s *Store) CloseTasks(ctx context.Context, ids []string, closedAt time.Time
 }
 
 // ReopenTasks reopens tasks and clears closed_at.
-func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.Time) (err error) {
+func (s *Store) ReopenTasks(ctx context.Context, project string, ids []string, reopenedAt time.Time) (err error) {
+	project = normalizeProject(project)
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
 		return nil
@@ -576,7 +609,7 @@ func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.T
 		}
 	}()
 
-	existsCount, err := countExistingTasks(ctx, tx, ids)
+	existsCount, err := countExistingTasksInProject(ctx, tx, project, ids)
 	if err != nil {
 		return err
 	}
@@ -584,11 +617,11 @@ func (s *Store) ReopenTasks(ctx context.Context, ids []string, reopenedAt time.T
 		return ErrTaskNotFound
 	}
 
-	args := []any{string(models.StatusOpen), dbFormatTime(reopenedAt)}
+	args := []any{string(models.StatusOpen), dbFormatTime(reopenedAt), project}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = NULL, updated_at = ? WHERE id IN (%s)", placeholders(len(ids)))
+	query := fmt.Sprintf("UPDATE tasks SET status = ?, closed_at = NULL, updated_at = ? WHERE project_id = ? AND id IN (%s)", placeholders(len(ids)))
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
@@ -680,6 +713,7 @@ func scanTask(scanner interface {
 		return nil, err
 	}
 
+	task.Project = projectFromTaskID(task.ID)
 	task.Description = description.String
 	task.SpecID = specID.String
 	task.ParentID = parentID.String
@@ -738,17 +772,56 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 
-func countExistingTasks(ctx context.Context, tx *sql.Tx, ids []string) (int, error) {
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
+func countExistingTasksInProject(ctx context.Context, tx *sql.Tx, project string, ids []string) (int, error) {
+	project = normalizeProject(project)
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, project)
+	for _, id := range ids {
+		args = append(args, id)
 	}
-	query := fmt.Sprintf("SELECT COUNT(*) FROM tasks WHERE id IN (%s)", placeholders(len(ids)))
+	query := fmt.Sprintf("SELECT COUNT(*) FROM tasks WHERE project_id = ? AND id IN (%s)", placeholders(len(ids)))
 	var count int
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+func projectFromTaskID(id string) string {
+	id = strings.TrimSpace(strings.ToLower(id))
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	prefix := strings.TrimSpace(parts[0])
+	if len(prefix) != 2 {
+		return ""
+	}
+	for _, r := range prefix {
+		if r < 'a' || r > 'z' {
+			return ""
+		}
+	}
+	return prefix
+}
+
+func normalizeProject(project string) string {
+	project = strings.TrimSpace(strings.ToLower(project))
+	if len(project) != 2 {
+		return project
+	}
+	for _, r := range project {
+		if r < 'a' || r > 'z' {
+			return project
+		}
+	}
+	return project
+}
+
+func sameTaskProject(childID, parentID string) bool {
+	childProject := projectFromTaskID(childID)
+	parentProject := projectFromTaskID(parentID)
+	return childProject != "" && childProject == parentProject
 }
 
 func nullIfEmpty(value string) any {
@@ -811,8 +884,9 @@ func insertLabels(ctx context.Context, tx *sql.Tx, id string, labels []string) e
 	return err
 }
 
-// DependencyTree returns the full dependency graph for a task.
-func (s *Store) DependencyTree(ctx context.Context, id string) ([]models.DepTreeNode, error) {
+// DependencyTree returns the full dependency graph for a task in one project.
+func (s *Store) DependencyTree(ctx context.Context, project string, id string) ([]models.DepTreeNode, error) {
+	project = normalizeProject(project)
 	query := fmt.Sprintf(`
 		WITH RECURSIVE
 		upstream(id, depth, dep_type, path) AS (
@@ -837,15 +911,15 @@ func (s *Store) DependencyTree(ctx context.Context, id string) ([]models.DepTree
 		)
 		SELECT t.id, t.title, t.status, t.type, u.depth, 'upstream' AS direction, u.dep_type
 		FROM upstream u
-		JOIN tasks t ON t.id = u.id
+		JOIN tasks t ON t.id = u.id AND t.project_id = ?
 		UNION ALL
 		SELECT t.id, t.title, t.status, t.type, d.depth, 'downstream' AS direction, d.dep_type
 		FROM downstream d
-		JOIN tasks t ON t.id = d.id
+		JOIN tasks t ON t.id = d.id AND t.project_id = ?
 		ORDER BY 6, 5, 1
 	`, models.DependencyTreeMaxDepth, models.DependencyTreeMaxDepth)
 
-	rows, err := s.db.QueryContext(ctx, query, id, id, id, id)
+	rows, err := s.db.QueryContext(ctx, query, id, id, id, id, project, project)
 	if err != nil {
 		return nil, err
 	}
@@ -896,8 +970,18 @@ func (s *Store) StoreInfo(ctx context.Context) (*StoreInfo, error) {
 }
 
 // CleanupClosedTasks removes (or reports) closed tasks older than cutoff.
-func (s *Store) CleanupClosedTasks(ctx context.Context, cutoff time.Time, dryRun bool) (*CleanupResult, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id FROM tasks WHERE status = ? AND updated_at < ?", string(models.StatusClosed), dbFormatTime(cutoff))
+func (s *Store) CleanupClosedTasks(ctx context.Context, project string, cutoff time.Time, dryRun bool) (*CleanupResult, error) {
+	project = normalizeProject(project)
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if project == "" {
+		rows, err = s.db.QueryContext(ctx, "SELECT id FROM tasks WHERE status = ? AND updated_at < ?", string(models.StatusClosed), dbFormatTime(cutoff))
+	} else {
+		rows, err = s.db.QueryContext(ctx, "SELECT id FROM tasks WHERE project_id = ? AND status = ? AND updated_at < ?", project, string(models.StatusClosed), dbFormatTime(cutoff))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -945,6 +1029,9 @@ func insertDeps(ctx context.Context, tx *sql.Tx, childID string, deps []models.D
 	values := make([]string, len(deps))
 	args := make([]any, 0, len(deps)*3)
 	for i, dep := range deps {
+		if !sameTaskProject(childID, dep.ParentID) {
+			return ErrProjectMismatch
+		}
 		values[i] = "(?, ?, ?)"
 		args = append(args, childID, dep.ParentID, dep.Type)
 	}

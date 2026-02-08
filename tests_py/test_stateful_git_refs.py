@@ -13,7 +13,7 @@ from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule, run_state_machine_as_test
 
-from tests_py.helpers import api_post
+from tests_py.helpers import api_post, scoped_api_path
 from tests_py.strategies_git_refs import (
     git_hash_valid,
     git_object_types,
@@ -38,7 +38,7 @@ STATEFUL_SETTINGS = settings(
 
 
 def request_json(env: dict[str, str], method: str, path: str, body: dict | None = None) -> tuple[int, dict | list]:
-    url = env["GRNS_API_URL"] + path
+    url = env["GRNS_API_URL"] + scoped_api_path(env, path)
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Content-Type": "application/json"} if body is not None else {}
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -164,7 +164,7 @@ def test_stateful_task_git_refs_model(running_server):
             if source_input is not None:
                 body["source_repo"] = source_input
 
-            created = api_post(env, "/v1/tasks", body)
+            created = api_post(env, "/v1/projects/gr/tasks", body)
             task_id = created["id"]
             self.tasks[task_id] = source_canonical or ""
             self.refs_by_task.setdefault(task_id, set())
@@ -181,7 +181,7 @@ def test_stateful_task_git_refs_model(running_server):
                 repo_canonical = canonical_repo_slug(str(repo_raw))
 
             if not repo_canonical:
-                status, err = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", payload)
+                status, err = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", payload)
                 assert status == 400
                 assert err["code"] == "invalid_argument"
                 return
@@ -201,7 +201,7 @@ def test_stateful_task_git_refs_model(running_server):
                 payload.get("resolved_commit", "").strip().lower(),
             )
 
-            status, resp = request_json(env, "POST", f"/v1/tasks/{task_id}/git-refs", payload)
+            status, resp = request_json(env, "POST", f"/v1/projects/gr/tasks/{task_id}/git-refs", payload)
             if signature in self.refs_by_task[task_id]:
                 assert status == 409
                 assert resp["code"] == "conflict"
@@ -218,7 +218,7 @@ def test_stateful_task_git_refs_model(running_server):
             candidates = sorted(list(self.id_to_signature.keys()) + list(self.deleted_ref_ids))
             ref_id = data.draw(st.sampled_from(candidates))
 
-            status, resp = request_json(env, "DELETE", f"/v1/git-refs/{ref_id}")
+            status, resp = request_json(env, "DELETE", f"/v1/projects/gr/git-refs/{ref_id}")
             if ref_id in self.id_to_signature:
                 assert status == 200
                 task_id, signature = self.id_to_signature.pop(ref_id)
@@ -260,7 +260,7 @@ def test_stateful_task_git_refs_model(running_server):
                 if sig not in self.refs_by_task[task_id]:
                     expected_new += 1
 
-            status, resp = request_json(env, "POST", "/v1/tasks/close", body)
+            status, resp = request_json(env, "POST", "/v1/projects/gr/tasks/close", body)
             if missing_repo:
                 assert status == 400
                 assert resp["code"] == "invalid_argument"
@@ -278,7 +278,7 @@ def test_stateful_task_git_refs_model(running_server):
         @rule(data=st.data())
         def list_refs(self, data):
             task_id = data.draw(st.sampled_from(sorted(self.tasks.keys())))
-            status, listed = request_json(env, "GET", f"/v1/tasks/{task_id}/git-refs")
+            status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task_id}/git-refs")
             assert status == 200
             api_sigs = {ref_signature(ref) for ref in listed}
             assert api_sigs == self.refs_by_task[task_id]
@@ -286,7 +286,7 @@ def test_stateful_task_git_refs_model(running_server):
         @invariant()
         def api_and_model_stay_in_sync(self):
             for task_id, expected_sigs in self.refs_by_task.items():
-                status, listed = request_json(env, "GET", f"/v1/tasks/{task_id}/git-refs")
+                status, listed = request_json(env, "GET", f"/v1/projects/gr/tasks/{task_id}/git-refs")
                 assert status == 200
                 api_sigs = [ref_signature(ref) for ref in listed]
                 assert len(api_sigs) == len(set(api_sigs))
@@ -299,12 +299,12 @@ def test_stateful_task_git_refs_model(running_server):
                     self.deleted_ref_ids.discard(ref_id)
 
             for ref_id, (_, sig) in self.id_to_signature.items():
-                status, fetched = request_json(env, "GET", f"/v1/git-refs/{ref_id}")
+                status, fetched = request_json(env, "GET", f"/v1/projects/gr/git-refs/{ref_id}")
                 assert status == 200
                 assert ref_signature(fetched) == sig
 
             for ref_id in self.deleted_ref_ids:
-                status, err = request_json(env, "GET", f"/v1/git-refs/{ref_id}")
+                status, err = request_json(env, "GET", f"/v1/projects/gr/git-refs/{ref_id}")
                 assert status == 404
                 assert err["code"] == "not_found"
 

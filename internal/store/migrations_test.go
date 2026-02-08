@@ -31,8 +31,8 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected version 6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected version 7, got %d", version)
 	}
 
 	// Verify tasks table exists.
@@ -59,8 +59,8 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected version 6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected version 7, got %d", version)
 	}
 }
 
@@ -111,8 +111,8 @@ func TestDetectPreMigrationDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected version 6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected version 7, got %d", version)
 	}
 }
 
@@ -126,11 +126,11 @@ func TestMigrationPlan(t *testing.T) {
 	if plan.CurrentVersion != 0 {
 		t.Fatalf("expected current 0, got %d", plan.CurrentVersion)
 	}
-	if plan.AvailableVersion != 6 {
-		t.Fatalf("expected available 6, got %d", plan.AvailableVersion)
+	if plan.AvailableVersion != 7 {
+		t.Fatalf("expected available 7, got %d", plan.AvailableVersion)
 	}
-	if len(plan.Pending) != 6 {
-		t.Fatalf("expected 6 pending, got %d", len(plan.Pending))
+	if len(plan.Pending) != 7 {
+		t.Fatalf("expected 7 pending, got %d", len(plan.Pending))
 	}
 }
 
@@ -146,8 +146,8 @@ func TestMigration002UpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected version 6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected version 7, got %d", version)
 	}
 
 	// Verify new columns exist by inserting a row that uses them.
@@ -380,6 +380,113 @@ func TestMigration006TaskGitRefsSchema(t *testing.T) {
 		VALUES ('gf-0002', 'gr-g601', 'rp-0001', 'related', 'unknown', 'abc', datetime('now'), datetime('now'))`); err == nil {
 		t.Fatal("expected invalid object_type to fail CHECK constraint")
 	}
+}
+
+func TestMigration007ProjectsScopeFoundation(t *testing.T) {
+	t.Run("fresh schema includes projects table, project_id column, and indexes", func(t *testing.T) {
+		db := testRawDB(t)
+		if err := runMigrations(db); err != nil {
+			t.Fatalf("run migrations: %v", err)
+		}
+
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='projects'").Scan(&count); err != nil {
+			t.Fatalf("check projects table: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("expected projects table to exist")
+		}
+
+		rows, err := db.Query("PRAGMA table_info(tasks)")
+		if err != nil {
+			t.Fatalf("pragma table_info(tasks): %v", err)
+		}
+		defer rows.Close()
+
+		hasProjectID := false
+		for rows.Next() {
+			var cid int
+			var name, dataType string
+			var notNull int
+			var defaultValue any
+			var pk int
+			if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+				t.Fatalf("scan table_info row: %v", err)
+			}
+			if name == "project_id" {
+				hasProjectID = true
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate table_info rows: %v", err)
+		}
+		if !hasProjectID {
+			t.Fatal("expected tasks.project_id column to exist")
+		}
+
+		for _, index := range []string{"idx_tasks_project_id", "idx_tasks_project_updated_desc", "idx_tasks_project_status_updated_desc"} {
+			if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", index).Scan(&count); err != nil {
+				t.Fatalf("check index %s: %v", index, err)
+			}
+			if count != 1 {
+				t.Fatalf("expected index %s to exist", index)
+			}
+		}
+	})
+
+	t.Run("upgrade from migration 6 backfills project_id", func(t *testing.T) {
+		db := testRawDB(t)
+
+		if err := ensureMigrationsTable(db); err != nil {
+			t.Fatalf("ensure migrations table: %v", err)
+		}
+
+		var migration7 Migration
+		for _, m := range migrations {
+			if m.Version < 7 {
+				if _, err := db.Exec(m.SQL); err != nil {
+					t.Fatalf("apply migration %d: %v", m.Version, err)
+				}
+				if _, err := db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))", m.Version); err != nil {
+					t.Fatalf("record migration %d: %v", m.Version, err)
+				}
+				continue
+			}
+			if m.Version == 7 {
+				migration7 = m
+			}
+		}
+
+		if migration7.Version != 7 {
+			t.Fatal("migration 7 not found")
+		}
+
+		if _, err := db.Exec(`INSERT INTO tasks (id, title, status, type, priority, created_at, updated_at)
+			VALUES ('gr-p706', 'Legacy row', 'open', 'task', 2, datetime('now'), datetime('now'))`); err != nil {
+			t.Fatalf("insert legacy row: %v", err)
+		}
+
+		if _, err := db.Exec(migration7.SQL); err != nil {
+			t.Fatalf("apply migration 7: %v", err)
+		}
+
+		var projectID string
+		if err := db.QueryRow("SELECT project_id FROM tasks WHERE id = 'gr-p706'").Scan(&projectID); err != nil {
+			t.Fatalf("query migrated row project_id: %v", err)
+		}
+		if projectID != "gr" {
+			t.Fatalf("expected project_id gr after backfill, got %q", projectID)
+		}
+
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM projects WHERE id = 'gr'").Scan(&count); err != nil {
+			t.Fatalf("query projects row: %v", err)
+		}
+		if count != 1 {
+			t.Fatal("expected project gr in projects table")
+		}
+	})
 }
 
 func containsPlan(plan, needle string) bool {

@@ -29,13 +29,14 @@ var (
 
 // TaskGitRefService orchestrates task↔git reference workflows.
 type TaskGitRefService struct {
-	taskStore   store.TaskServiceStore
-	gitRefStore store.GitRefStore
+	taskStore     store.TaskServiceStore
+	gitRefStore   store.GitRefStore
+	projectPrefix string
 }
 
 // NewTaskGitRefService constructs a TaskGitRefService.
-func NewTaskGitRefService(taskStore store.TaskServiceStore, gitRefStore store.GitRefStore) *TaskGitRefService {
-	return &TaskGitRefService{taskStore: taskStore, gitRefStore: gitRefStore}
+func NewTaskGitRefService(taskStore store.TaskServiceStore, gitRefStore store.GitRefStore, projectPrefix string) *TaskGitRefService {
+	return &TaskGitRefService{taskStore: taskStore, gitRefStore: gitRefStore, projectPrefix: projectPrefix}
 }
 
 // Create creates one task git ref.
@@ -48,6 +49,13 @@ func (s *TaskGitRefService) Create(ctx context.Context, taskID string, req api.T
 	taskID = strings.TrimSpace(taskID)
 	if !validateID(taskID) {
 		return zero, badRequestCode(fmt.Errorf("invalid task_id"), ErrCodeInvalidID)
+	}
+	project, err := s.project(ctx)
+	if err != nil {
+		return zero, err
+	}
+	if !taskIDBelongsToProject(taskID, project) {
+		return zero, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 
 	task, err := s.taskStore.GetTask(ctx, taskID)
@@ -103,6 +111,7 @@ func (s *TaskGitRefService) Create(ctx context.Context, taskID string, req api.T
 	now := time.Now().UTC()
 
 	ref := &models.TaskGitRef{
+		Project:        project,
 		ID:             id,
 		TaskID:         taskID,
 		RepoID:         repo.ID,
@@ -123,7 +132,7 @@ func (s *TaskGitRefService) Create(ctx context.Context, taskID string, req api.T
 		return zero, err
 	}
 
-	stored, err := s.gitRefStore.GetTaskGitRef(ctx, ref.ID)
+	stored, err := s.gitRefStore.GetTaskGitRef(ctx, project, ref.ID)
 	if err != nil {
 		return zero, err
 	}
@@ -143,11 +152,18 @@ func (s *TaskGitRefService) List(ctx context.Context, taskID string) ([]models.T
 	if !validateID(taskID) {
 		return nil, badRequestCode(fmt.Errorf("invalid task_id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(taskID); err != nil {
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !taskIDBelongsToProject(taskID, project) {
+		return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+	if err := s.ensureTaskExists(ctx, taskID); err != nil {
 		return nil, err
 	}
 
-	return s.gitRefStore.ListTaskGitRefs(ctx, taskID)
+	return s.gitRefStore.ListTaskGitRefs(ctx, project, taskID)
 }
 
 // Get returns one task git ref by id.
@@ -162,7 +178,12 @@ func (s *TaskGitRefService) Get(ctx context.Context, id string) (models.TaskGitR
 		return zero, badRequestCode(fmt.Errorf("invalid ref_id"), ErrCodeInvalidID)
 	}
 
-	ref, err := s.gitRefStore.GetTaskGitRef(ctx, id)
+	project, err := s.project(ctx)
+	if err != nil {
+		return zero, err
+	}
+
+	ref, err := s.gitRefStore.GetTaskGitRef(ctx, project, id)
 	if err != nil {
 		return zero, err
 	}
@@ -183,7 +204,12 @@ func (s *TaskGitRefService) Delete(ctx context.Context, id string) error {
 		return badRequestCode(fmt.Errorf("invalid ref_id"), ErrCodeInvalidID)
 	}
 
-	ref, err := s.gitRefStore.GetTaskGitRef(ctx, id)
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
+
+	ref, err := s.gitRefStore.GetTaskGitRef(ctx, project, id)
 	if err != nil {
 		return err
 	}
@@ -191,10 +217,18 @@ func (s *TaskGitRefService) Delete(ctx context.Context, id string) error {
 		return notFoundCode(fmt.Errorf("git ref not found"), ErrCodeGitRefNotFound)
 	}
 
-	return s.gitRefStore.DeleteTaskGitRef(ctx, id)
+	return s.gitRefStore.DeleteTaskGitRef(ctx, project, id)
 }
 
-func (s *TaskGitRefService) ensureTaskExists(id string) error {
+func (s *TaskGitRefService) ensureTaskExists(ctx context.Context, id string) error {
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
+	if !taskIDBelongsToProject(id, project) {
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+
 	exists, err := s.taskStore.TaskExists(id)
 	if err != nil {
 		return err
@@ -207,13 +241,20 @@ func (s *TaskGitRefService) ensureTaskExists(id string) error {
 
 func (s *TaskGitRefService) nextTaskGitRefID(ctx context.Context) (string, error) {
 	exists := func(id string) (bool, error) {
-		ref, err := s.gitRefStore.GetTaskGitRef(ctx, id)
+		ref, err := s.gitRefStore.GetTaskGitRef(ctx, "", id)
 		if err != nil {
 			return false, err
 		}
 		return ref != nil, nil
 	}
 	return store.GenerateTaskGitRefID(exists)
+}
+
+func (s *TaskGitRefService) project(ctx context.Context) (string, error) {
+	if project, ok := projectFromContext(ctx); ok {
+		return project, nil
+	}
+	return normalizePrefix(s.projectPrefix)
 }
 
 func normalizeGitRelation(raw string) (string, error) {

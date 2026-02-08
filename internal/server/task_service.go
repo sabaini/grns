@@ -30,7 +30,7 @@ func NewTaskService(store store.TaskServiceStore, projectPrefix string) *TaskSer
 
 // Create creates a task from a request.
 func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (api.TaskResponse, error) {
-	prefix, err := normalizePrefix(s.projectPrefix)
+	prefix, err := s.project(ctx)
 	if err != nil {
 		return api.TaskResponse{}, err
 	}
@@ -49,7 +49,7 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 		if isUniqueConstraint(err) {
 			return api.TaskResponse{}, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
 		}
-		if isForeignKeyConstraint(err) {
+		if isForeignKeyConstraint(err) || errors.Is(err, store.ErrProjectMismatch) {
 			return api.TaskResponse{}, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 		}
 		return api.TaskResponse{}, err
@@ -64,7 +64,7 @@ func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequ
 		return nil, badRequestCode(fmt.Errorf("tasks array is required"), ErrCodeMissingRequired)
 	}
 
-	prefix, err := normalizePrefix(s.projectPrefix)
+	prefix, err := s.project(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequ
 		if isUniqueConstraint(err) {
 			return nil, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
 		}
-		if isForeignKeyConstraint(err) {
+		if isForeignKeyConstraint(err) || errors.Is(err, store.ErrProjectMismatch) {
 			return nil, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 		}
 		return nil, err
@@ -218,6 +218,7 @@ func (s *TaskService) prepareCreateRequest(prefix string, req api.TaskCreateRequ
 	}
 
 	task := &models.Task{
+		Project:            prefix,
 		ID:                 id,
 		Title:              strings.TrimSpace(req.Title),
 		Status:             status,
@@ -270,6 +271,14 @@ func (s *TaskService) validateDependencyParents(deps []models.Dependency, create
 func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateRequest) (api.TaskResponse, error) {
 	var resp api.TaskResponse
 
+	project, err := s.project(ctx)
+	if err != nil {
+		return resp, err
+	}
+	if !taskIDBelongsToProject(id, project) {
+		return resp, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+
 	update, err := buildTaskUpdateFromRequest(req, time.Now().UTC())
 	if err != nil {
 		return resp, err
@@ -285,6 +294,14 @@ func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateR
 // Get returns a task response by id.
 func (s *TaskService) Get(ctx context.Context, id string) (api.TaskResponse, error) {
 	var resp api.TaskResponse
+
+	project, err := s.project(ctx)
+	if err != nil {
+		return resp, err
+	}
+	if !taskIDBelongsToProject(id, project) {
+		return resp, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
 
 	task, err := s.store.GetTask(ctx, id)
 	if err != nil {
@@ -313,8 +330,18 @@ func (s *TaskService) GetMany(ctx context.Context, ids []string) ([]api.TaskResp
 		return nil, badRequestCode(fmt.Errorf("ids are required"), ErrCodeMissingRequired)
 	}
 
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if !taskIDBelongsToProject(id, project) {
+			return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+		}
+	}
+
 	uniqueIDs := uniqueStrings(ids)
-	tasks, err := s.store.ListTasks(ctx, taskListFilter{IDs: uniqueIDs}.toStoreListFilter())
+	tasks, err := s.store.ListTasks(ctx, taskListFilter{Project: project, IDs: uniqueIDs}.toStoreListFilter())
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +373,11 @@ func (s *TaskService) GetMany(ctx context.Context, ids []string) ([]api.TaskResp
 
 // List returns tasks with labels.
 func (s *TaskService) List(ctx context.Context, filter taskListFilter) ([]api.TaskResponse, error) {
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filter.Project = project
 	tasks, err := s.store.ListTasks(ctx, filter.toStoreListFilter())
 	if err != nil {
 		if filter.SearchQuery != "" && isInvalidSearchQuery(err) {
@@ -358,7 +390,11 @@ func (s *TaskService) List(ctx context.Context, filter taskListFilter) ([]api.Ta
 
 // ExportPage returns one export page hydrated with labels and dependencies.
 func (s *TaskService) ExportPage(ctx context.Context, limit, offset int) ([]api.TaskResponse, error) {
-	tasks, err := s.store.ListTasks(ctx, taskListFilter{Limit: limit, Offset: offset}.toStoreListFilter())
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.store.ListTasks(ctx, taskListFilter{Project: project, Limit: limit, Offset: offset}.toStoreListFilter())
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +403,11 @@ func (s *TaskService) ExportPage(ctx context.Context, limit, offset int) ([]api.
 
 // Ready returns ready tasks with labels.
 func (s *TaskService) Ready(ctx context.Context, limit int) ([]api.TaskResponse, error) {
-	tasks, err := s.store.ListReadyTasks(ctx, limit)
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.store.ListReadyTasks(ctx, project, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +416,11 @@ func (s *TaskService) Ready(ctx context.Context, limit int) ([]api.TaskResponse,
 
 // Stale returns stale tasks with labels.
 func (s *TaskService) Stale(ctx context.Context, cutoff time.Time, statuses []string, limit int) ([]api.TaskResponse, error) {
-	tasks, err := s.store.ListStaleTasks(ctx, cutoff, statuses, limit)
+	project, err := s.project(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.store.ListStaleTasks(ctx, project, cutoff, statuses, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -385,8 +429,12 @@ func (s *TaskService) Stale(ctx context.Context, cutoff time.Time, statuses []st
 
 // Close closes tasks by ids.
 func (s *TaskService) Close(ctx context.Context, ids []string) error {
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	err := s.store.CloseTasks(ctx, ids, now)
+	err = s.store.CloseTasks(ctx, project, ids, now)
 	if errors.Is(err, store.ErrTaskNotFound) {
 		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
@@ -417,8 +465,16 @@ func (s *TaskService) CloseWithCommit(ctx context.Context, ids []string, commit,
 		}
 	}
 
+	project, err := s.project(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	refs := make([]store.CloseTaskGitRefInput, 0, len(ids))
 	for _, id := range ids {
+		if !taskIDBelongsToProject(id, project) {
+			return 0, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+		}
 		task, err := s.store.GetTask(ctx, id)
 		if err != nil {
 			return 0, err
@@ -445,7 +501,7 @@ func (s *TaskService) CloseWithCommit(ctx context.Context, ids []string, commit,
 	}
 
 	now := time.Now().UTC()
-	created, err := gitRefStore.CloseTasksWithGitRefs(ctx, ids, now, refs)
+	created, err := gitRefStore.CloseTasksWithGitRefs(ctx, project, ids, now, refs)
 	if errors.Is(err, store.ErrTaskNotFound) {
 		return 0, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
@@ -465,8 +521,12 @@ func closeRepoValidationError(err error) error {
 
 // Reopen reopens tasks by ids.
 func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	err := s.store.ReopenTasks(ctx, ids, now)
+	err = s.store.ReopenTasks(ctx, project, ids, now)
 	if errors.Is(err, store.ErrTaskNotFound) {
 		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
@@ -478,17 +538,30 @@ func (s *TaskService) AddDependency(ctx context.Context, childID, parentID, depT
 	if !validateID(childID) || !validateID(parentID) {
 		return badRequestCode(fmt.Errorf("invalid dependency ids"), ErrCodeInvalidDependency)
 	}
-	if err := s.ensureTaskExists(childID); err != nil {
+	project, err := s.project(ctx)
+	if err != nil {
 		return err
 	}
-	if err := s.ensureTaskExists(parentID); err != nil {
+	if !taskIDBelongsToProject(childID, project) || !taskIDBelongsToProject(parentID, project) {
+		return badRequestCode(fmt.Errorf("invalid dependency ids"), ErrCodeInvalidDependency)
+	}
+	if err := s.ensureTaskExists(ctx, childID); err != nil {
+		return err
+	}
+	if err := s.ensureTaskExists(ctx, parentID); err != nil {
 		return err
 	}
 	depType = strings.TrimSpace(depType)
 	if depType == "" {
 		depType = string(models.DependencyBlocks)
 	}
-	return s.store.AddDependency(ctx, childID, parentID, depType)
+	if err := s.store.AddDependency(ctx, childID, parentID, depType); err != nil {
+		if errors.Is(err, store.ErrProjectMismatch) {
+			return badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
+		}
+		return err
+	}
+	return nil
 }
 
 // AddLabels adds labels to a task and returns the updated label set.
@@ -496,7 +569,7 @@ func (s *TaskService) AddLabels(ctx context.Context, id string, labels []string)
 	if !validateID(id) {
 		return nil, badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(id); err != nil {
+	if err := s.ensureTaskExists(ctx, id); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeLabels(labels)
@@ -514,7 +587,7 @@ func (s *TaskService) RemoveLabels(ctx context.Context, id string, labels []stri
 	if !validateID(id) {
 		return nil, badRequestCode(fmt.Errorf("invalid id"), ErrCodeInvalidID)
 	}
-	if err := s.ensureTaskExists(id); err != nil {
+	if err := s.ensureTaskExists(ctx, id); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeLabels(labels)
@@ -529,10 +602,22 @@ func (s *TaskService) RemoveLabels(ctx context.Context, id string, labels []stri
 
 // Import processes an import request.
 func (s *TaskService) Import(ctx context.Context, req api.ImportRequest) (api.ImportResponse, error) {
-	return s.importer.Import(ctx, req)
+	project, err := s.project(ctx)
+	if err != nil {
+		return api.ImportResponse{}, err
+	}
+	return s.importer.Import(ctx, req, project)
 }
 
-func (s *TaskService) ensureTaskExists(id string) error {
+func (s *TaskService) ensureTaskExists(ctx context.Context, id string) error {
+	project, err := s.project(ctx)
+	if err != nil {
+		return err
+	}
+	if !taskIDBelongsToProject(id, project) {
+		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+
 	exists, err := s.store.TaskExists(id)
 	if err != nil {
 		return err
@@ -541,6 +626,35 @@ func (s *TaskService) ensureTaskExists(id string) error {
 		return notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 	return nil
+}
+
+func (s *TaskService) project(ctx context.Context) (string, error) {
+	if project, ok := projectFromContext(ctx); ok {
+		return project, nil
+	}
+	return normalizePrefix(s.projectPrefix)
+}
+
+func taskIDBelongsToProject(id, project string) bool {
+	id = strings.TrimSpace(strings.ToLower(id))
+	project = strings.TrimSpace(strings.ToLower(project))
+	if len(project) != 2 {
+		return false
+	}
+	return strings.HasPrefix(id, project+"-")
+}
+
+func taskIDProjectPrefix(id string) string {
+	id = strings.TrimSpace(strings.ToLower(id))
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	project := strings.TrimSpace(parts[0])
+	if len(project) != 2 {
+		return ""
+	}
+	return project
 }
 
 func uniqueStrings(values []string) []string {

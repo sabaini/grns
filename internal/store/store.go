@@ -35,8 +35,12 @@ type txImportMutator struct {
 }
 
 func (m *txImportMutator) TaskExists(id string) (bool, error) {
+	project := projectFromTaskID(id)
+	if project == "" {
+		return false, nil
+	}
 	var exists int
-	err := m.tx.QueryRow("SELECT 1 FROM tasks WHERE id = ? LIMIT 1", id).Scan(&exists)
+	err := m.tx.QueryRow("SELECT 1 FROM tasks WHERE id = ? AND project_id = ? LIMIT 1", id, project).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -80,8 +84,12 @@ func (m *txImportMutator) RemoveDependencies(ctx context.Context, childID string
 
 // TaskExists checks whether a task exists by id.
 func (s *Store) TaskExists(id string) (bool, error) {
+	project := projectFromTaskID(id)
+	if project == "" {
+		return false, nil
+	}
 	var exists int
-	err := s.db.QueryRow("SELECT 1 FROM tasks WHERE id = ? LIMIT 1", id).Scan(&exists)
+	err := s.db.QueryRow("SELECT 1 FROM tasks WHERE id = ? AND project_id = ? LIMIT 1", id, project).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

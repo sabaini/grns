@@ -166,7 +166,7 @@ def test_mixed_ids_all_or_nothing(running_server, action, setup_action):
 
 def test_api_rejects_malformed_query_params(running_server):
     env = running_server
-    url = env["GRNS_API_URL"] + "/v1/tasks?offset=-1"
+    url = env["GRNS_API_URL"] + "/v1/projects/gr/tasks?offset=-1"
 
     with pytest.raises(urllib.error.HTTPError) as exc_info:
         urllib.request.urlopen(url)

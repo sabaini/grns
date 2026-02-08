@@ -10,6 +10,10 @@ import (
 )
 
 func (s *Server) handleCreateTaskGitRef(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.gitRefService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("git refs are not configured")))
 		return
@@ -35,6 +39,10 @@ func (s *Server) handleCreateTaskGitRef(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleListTaskGitRefs(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.gitRefService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("git refs are not configured")))
 		return
@@ -58,6 +66,10 @@ func (s *Server) handleListTaskGitRefs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTaskGitRef(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.gitRefService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("git refs are not configured")))
 		return
@@ -79,6 +91,10 @@ func (s *Server) handleGetTaskGitRef(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTaskGitRef(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pathProjectOrBadRequest(w, r); !ok {
+		return
+	}
+
 	if s.gitRefService == nil {
 		s.writeServiceError(w, r, internalError(fmt.Errorf("git refs are not configured")))
 		return

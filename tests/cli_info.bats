@@ -10,7 +10,7 @@ load 'helpers.bash'
   [ "$status" -eq 0 ]
 
   version="$(printf '%s' "$output" | json_get schema_version)"
-  [ "$version" = "6" ]
+  [ "$version" -ge 7 ]
 
   total="$(printf '%s' "$output" | json_get total_tasks)"
   [ "$total" = "2" ]

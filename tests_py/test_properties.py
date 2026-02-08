@@ -69,7 +69,7 @@ def test_create_show_roundtrip(running_server, title, priority, task_type):
     """Creating a task and showing it returns the same field values."""
     env = running_server
 
-    created = api_post(env, "/v1/tasks", {
+    created = api_post(env, "/v1/projects/gr/tasks", {
         "title": title,
         "priority": priority,
         "type": task_type,
@@ -82,7 +82,7 @@ def test_create_show_roundtrip(running_server, title, priority, task_type):
     assert created["type"] == task_type
 
     # Verify show returns exactly what create stored
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     assert shown["title"] == created["title"]
     assert shown["priority"] == priority
     assert shown["type"] == task_type
@@ -99,7 +99,7 @@ def test_create_show_roundtrip(running_server, title, priority, task_type):
 def test_valid_priority_accepted(running_server, priority):
     """Any priority in [0, 4] is accepted on create."""
     env = running_server
-    resp = api_post(env, "/v1/tasks", {"title": "prio test", "priority": priority})
+    resp = api_post(env, "/v1/projects/gr/tasks", {"title": "prio test", "priority": priority})
     assert resp["priority"] == priority
 
 
@@ -110,7 +110,7 @@ def test_invalid_priority_rejected(running_server, priority):
     env = running_server
 
     with pytest.raises(urllib.error.HTTPError) as exc_info:
-        api_post(env, "/v1/tasks", {"title": "bad prio", "priority": priority})
+        api_post(env, "/v1/projects/gr/tasks", {"title": "bad prio", "priority": priority})
     assert exc_info.value.code == 400
 
 
@@ -125,10 +125,10 @@ def test_status_normalization_case_insensitive(running_server, status):
     """Updating status with any casing normalizes to lowercase."""
     env = running_server
 
-    created = api_post(env, "/v1/tasks", {"title": "status norm"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "status norm"})
     task_id = created["id"]
 
-    updated = api_patch(env, f"/v1/tasks/{task_id}", {"status": status})
+    updated = api_patch(env, f"/v1/projects/gr/tasks/{task_id}", {"status": status})
     assert updated["status"] == status.strip().lower()
     assert updated["status"] in VALID_STATUSES
 
@@ -144,7 +144,7 @@ def test_type_normalization_case_insensitive(running_server, task_type):
     """Creating with any casing of a valid type normalizes to lowercase."""
     env = running_server
 
-    created = api_post(env, "/v1/tasks", {"title": "type norm", "type": task_type})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "type norm", "type": task_type})
     assert created["type"] == task_type.strip().lower()
     assert created["type"] in VALID_TYPES
 
@@ -162,10 +162,10 @@ def test_labels_normalized_deduped_sorted(running_server, labels):
     env = running_server
     assume(all(lbl.strip() for lbl in labels))
 
-    created = api_post(env, "/v1/tasks", {"title": "label test", "labels": labels})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "label test", "labels": labels})
     task_id = created["id"]
 
-    shown = api_get(env, f"/v1/tasks/{task_id}")
+    shown = api_get(env, f"/v1/projects/gr/tasks/{task_id}")
     result_labels = shown.get("labels", [])
 
     expected = sorted(set(lbl.lower() for lbl in labels))
@@ -198,7 +198,7 @@ def test_update_preserves_unmodified_fields(
     """Updating a single field leaves all other fields unchanged."""
     env = running_server
 
-    created = api_post(env, "/v1/tasks", {
+    created = api_post(env, "/v1/projects/gr/tasks", {
         "title": "preserve test",
         "type": "bug",
         "priority": 3,
@@ -215,7 +215,7 @@ def test_update_preserves_unmodified_fields(
     }
     single_patch = {field_to_update: patch[field_to_update]}
 
-    updated = api_patch(env, f"/v1/tasks/{task_id}", single_patch)
+    updated = api_patch(env, f"/v1/projects/gr/tasks/{task_id}", single_patch)
 
     # The updated field should have the new value
     if field_to_update == "priority":
@@ -250,7 +250,7 @@ def test_title_whitespace_trimmed(running_server, title):
     env = running_server
     padded = f"  {title}  "
 
-    created = api_post(env, "/v1/tasks", {"title": padded})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": padded})
     assert created["title"] == padded.strip()
 
 
@@ -265,11 +265,11 @@ def test_invalid_status_rejected(running_server, status):
     """Updating with an invalid status string is rejected."""
     env = running_server
 
-    created = api_post(env, "/v1/tasks", {"title": "inv status"})
+    created = api_post(env, "/v1/projects/gr/tasks", {"title": "inv status"})
     task_id = created["id"]
 
     with pytest.raises(urllib.error.HTTPError) as exc_info:
-        api_patch(env, f"/v1/tasks/{task_id}", {"status": status})
+        api_patch(env, f"/v1/projects/gr/tasks/{task_id}", {"status": status})
     assert exc_info.value.code == 400
 
 

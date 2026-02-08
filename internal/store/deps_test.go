@@ -31,7 +31,7 @@ func TestDependencyTree(t *testing.T) {
 	}
 
 	t.Run("from middle node", func(t *testing.T) {
-		nodes, err := st.DependencyTree(ctx, "gr-dt02")
+		nodes, err := st.DependencyTree(ctx, "gr", "gr-dt02")
 		if err != nil {
 			t.Fatalf("tree: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestDependencyTree(t *testing.T) {
 	})
 
 	t.Run("from leaf node", func(t *testing.T) {
-		nodes, err := st.DependencyTree(ctx, "gr-dt03")
+		nodes, err := st.DependencyTree(ctx, "gr", "gr-dt03")
 		if err != nil {
 			t.Fatalf("tree: %v", err)
 		}
@@ -76,7 +76,7 @@ func TestDependencyTree(t *testing.T) {
 			t.Fatalf("create: %v", err)
 		}
 
-		nodes, err := st.DependencyTree(ctx, "gr-dt04")
+		nodes, err := st.DependencyTree(ctx, "gr", "gr-dt04")
 		if err != nil {
 			t.Fatalf("tree: %v", err)
 		}
@@ -136,6 +136,29 @@ func TestReplaceLabels(t *testing.T) {
 	}
 	if len(labels) != 2 || labels[0] != "delta" || labels[1] != "gamma" {
 		t.Fatalf("expected [delta, gamma], got %v", labels)
+	}
+}
+
+func TestAddDependencyRejectsCrossProject(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, task := range []*models.Task{
+		{ID: "gr-cp01", Title: "gr child", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "xy-cp01", Title: "xy parent", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+			t.Fatalf("create %s: %v", task.ID, err)
+		}
+	}
+
+	err := st.AddDependency(ctx, "gr-cp01", "xy-cp01", "blocks")
+	if err == nil {
+		t.Fatal("expected cross-project dependency to fail")
+	}
+	if err != ErrProjectMismatch {
+		t.Fatalf("expected ErrProjectMismatch, got %v", err)
 	}
 }
 

@@ -81,12 +81,12 @@ func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *s
 
 	var attachmentService *AttachmentService
 	if attachmentStore, ok := any(taskStore).(store.AttachmentStore); ok {
-		attachmentService = NewAttachmentService(taskStore, attachmentStore, bs)
+		attachmentService = NewAttachmentService(taskStore, attachmentStore, bs, projectPrefix)
 	}
 
 	var gitRefService *TaskGitRefService
 	if gitRefStore, ok := any(taskStore).(store.GitRefStore); ok {
-		gitRefService = NewTaskGitRefService(taskStore, gitRefStore)
+		gitRefService = NewTaskGitRefService(taskStore, gitRefStore, projectPrefix)
 	}
 
 	srv := &Server{

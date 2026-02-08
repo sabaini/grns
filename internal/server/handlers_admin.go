@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"grns/internal/api"
@@ -22,8 +23,18 @@ func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	project := ""
+	if strings.TrimSpace(req.Project) != "" {
+		normalized, err := normalizePrefix(req.Project)
+		if err != nil {
+			s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("invalid project"), ErrCodeInvalidArgument))
+			return
+		}
+		project = normalized
+	}
+
 	cutoff := time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
-	result, err := s.store.CleanupClosedTasks(r.Context(), cutoff, req.DryRun)
+	result, err := s.store.CleanupClosedTasks(r.Context(), project, cutoff, req.DryRun)
 	if err != nil {
 		s.writeStoreError(w, r, err)
 		return

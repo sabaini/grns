@@ -38,6 +38,7 @@ type GitRepo struct {
 
 // TaskGitRef is a typed link from one task to one git object.
 type TaskGitRef struct {
+	Project        string         `json:"project,omitempty"`
 	ID             string         `json:"id"`
 	TaskID         string         `json:"task_id"`
 	RepoID         string         `json:"repo_id"`

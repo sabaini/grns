@@ -32,6 +32,7 @@ const (
 )
 
 type importRun struct {
+	project         string
 	req             api.ImportRequest
 	dedupe          string
 	orphanHandling  string
@@ -43,13 +44,14 @@ type importRun struct {
 }
 
 // Import processes an import request (validate/normalize -> upsert tasks -> apply deps).
-func (i *Importer) Import(ctx context.Context, req api.ImportRequest) (api.ImportResponse, error) {
+func (i *Importer) Import(ctx context.Context, req api.ImportRequest, project string) (api.ImportResponse, error) {
 	applyMode := "best_effort"
 	if req.Atomic {
 		applyMode = "atomic"
 	}
 
 	run := &importRun{
+		project:         project,
 		req:             req,
 		dedupe:          req.Dedupe,
 		orphanHandling:  req.OrphanHandling,
@@ -102,7 +104,7 @@ func (i *Importer) Import(ctx context.Context, req api.ImportRequest) (api.Impor
 
 func (i *Importer) normalizeAndValidate(run *importRun) error {
 	for idx, raw := range run.req.Tasks {
-		rec, skip, err := normalizeImportRecord(raw)
+		rec, skip, err := normalizeImportRecord(raw, run.project)
 		if err != nil {
 			return badRequest(err)
 		}
@@ -272,13 +274,33 @@ func (i *Importer) taskExists(run *importRun, mutator store.ImportMutator, id st
 	return exists, nil
 }
 
-func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool, error) {
+func normalizeImportRecord(rec api.TaskImportRecord, project string) (api.TaskImportRecord, bool, error) {
+	project, err := normalizePrefix(project)
+	if err != nil {
+		return rec, false, badRequestCode(fmt.Errorf("invalid project"), ErrCodeInvalidArgument)
+	}
+
+	rec.Project = strings.TrimSpace(rec.Project)
+	if rec.Project != "" {
+		recProject, err := normalizePrefix(rec.Project)
+		if err != nil {
+			return rec, false, badRequestCode(fmt.Errorf("invalid project"), ErrCodeInvalidArgument)
+		}
+		if recProject != project {
+			return rec, false, badRequestCode(fmt.Errorf("project does not match route project"), ErrCodeInvalidArgument)
+		}
+	}
+	rec.Project = project
+
 	rec.ID = strings.TrimSpace(rec.ID)
 	rec.Title = strings.TrimSpace(rec.Title)
 	if rec.ID == "" || rec.Title == "" {
 		return rec, true, nil
 	}
 	if !validateID(rec.ID) {
+		return rec, false, badRequestCode(fmt.Errorf("invalid id: %s", rec.ID), ErrCodeInvalidID)
+	}
+	if !taskIDBelongsToProject(rec.ID, project) {
 		return rec, false, badRequestCode(fmt.Errorf("invalid id: %s", rec.ID), ErrCodeInvalidID)
 	}
 
@@ -299,8 +321,10 @@ func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool
 	}
 
 	rec.ParentID = strings.TrimSpace(rec.ParentID)
-	if rec.ParentID != "" && !validateID(rec.ParentID) {
-		return rec, false, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
+	if rec.ParentID != "" {
+		if !validateID(rec.ParentID) || !taskIDBelongsToProject(rec.ParentID, project) {
+			return rec, false, badRequestCode(fmt.Errorf("invalid parent_id"), ErrCodeInvalidParentID)
+		}
 	}
 
 	if rec.Labels != nil {
@@ -315,7 +339,7 @@ func normalizeImportRecord(rec api.TaskImportRecord) (api.TaskImportRecord, bool
 		deps := make([]models.Dependency, 0, len(rec.Deps))
 		for _, dep := range rec.Deps {
 			parentID := strings.TrimSpace(dep.ParentID)
-			if parentID == "" || !validateID(parentID) {
+			if parentID == "" || !validateID(parentID) || !taskIDBelongsToProject(parentID, project) {
 				return rec, false, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 			}
 			depType := strings.TrimSpace(dep.Type)

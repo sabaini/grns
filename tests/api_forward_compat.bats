@@ -23,7 +23,7 @@ payload = {
     "unknown_scalar": "ok"
 }
 req = urllib.request.Request(
-    base + "/v1/tasks",
+    base + "/v1/projects/gr/tasks",
     data=json.dumps(payload).encode("utf-8"),
     method="POST",
     headers={"Content-Type": "application/json"},
@@ -33,7 +33,7 @@ with urllib.request.urlopen(req) as resp:
     created = json.loads(resp.read().decode("utf-8"))
 
 task_id = created["id"]
-with urllib.request.urlopen(base + f"/v1/tasks/{task_id}") as resp:
+with urllib.request.urlopen(base + f"/v1/projects/gr/tasks/{task_id}") as resp:
     shown = json.loads(resp.read().decode("utf-8"))
 
 assert shown["id"] == task_id
@@ -52,11 +52,11 @@ import urllib.error
 import urllib.request
 
 base = os.environ["GRNS_API_URL"]
-# /v1/tasks uses defaultJSONMaxBody (1 MiB). Send a payload over that limit.
+# /v1/projects/gr/tasks uses defaultJSONMaxBody (1 MiB). Send a payload over that limit.
 oversized_title = "x" * (2 * 1024 * 1024)
 payload = {"title": oversized_title, "priority": 2}
 req = urllib.request.Request(
-    base + "/v1/tasks",
+    base + "/v1/projects/gr/tasks",
     data=json.dumps(payload).encode("utf-8"),
     method="POST",
     headers={"Content-Type": "application/json"},
