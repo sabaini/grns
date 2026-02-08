@@ -44,7 +44,7 @@ A typed edge model gives:
 Canonical identity for a repository.
 
 Fields:
-- `id` (`gr-...` style repo id, e.g. `rp-xxxxxx`)
+- `id` (`rp-xxxx`, 4-char base36)
 - `slug` (unique canonical form, e.g. `github.com/org/repo`)
 - `default_branch` (optional)
 - `created_at`, `updated_at`

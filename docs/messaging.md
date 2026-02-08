@@ -1,5 +1,8 @@
 # Messaging Design for Multi-Agent Task Execution
 
+> **Status: Proposed — Not yet implemented.**
+> This document describes a future messaging architecture. No broker integration exists in the current codebase.
+
 ## Summary
 This document defines a broker-backed execution model for agents, while keeping task state authoritative in the database.
 

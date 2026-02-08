@@ -28,9 +28,79 @@ grns close <id> --json
 grns reopen <id> --json
 ```
 
-## Configuration
+## Data Model
 
-See `docs/config.md` for detailed examples.
+### Task IDs
+
+Format: `<prefix>-<4char>` (e.g. `gr-ab12`). The prefix is a 2-letter project identifier (default `gr`, configurable via `project_prefix`). The suffix is 4 random base36 characters. IDs are immutable once created.
+
+### Statuses
+
+`open` (default), `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `tombstone`
+
+### Types
+
+`bug`, `feature`, `task` (default), `epic`, `chore`
+
+### Priority
+
+Integer 0–4. Default: `2`. Lower is higher priority.
+
+### Labels
+
+ASCII, non-space, case-insensitive (lowercased on store), deduplicated.
+
+### Timestamps
+
+RFC3339 UTC. `updated_at` changes on any mutation. `closed_at` is set on close, cleared on reopen.
+
+### Custom fields
+
+Arbitrary key-value metadata stored as a JSON object:
+
+```bash
+grns create "Task" --custom team=platform --custom env=staging
+grns create "Task" --custom-json '{"team": "platform", "count": 42}'
+grns update <id> --custom team=infra
+```
+
+Custom fields are returned in the `custom` object of task responses.
+
+### Dependencies
+
+Type: `blocks` (only supported type). A dependency `child blocks parent` means the parent cannot be "ready" until the child is closed.
+
+```bash
+grns dep add <child-id> <parent-id>
+grns dep tree <id>
+```
+
+### Attachment kinds
+
+`spec`, `diagram`, `artifact`, `diagnostic`, `archive`, `other`
+
+### Git reference relations
+
+`design_doc`, `implements`, `fix_commit`, `closed_by`, `introduced_by`, `related`, or `x-*` (custom extensions).
+
+### Git reference object types
+
+`commit`, `tag`, `branch`, `path`, `blob`, `tree`
+
+For `commit`, `blob`, and `tree`, the object value must be a 40-character lowercase hex SHA. For `path`, it must be a workspace-relative path (no leading `/`, no `..`).
+
+## Server
+
+The CLI auto-spawns a local server process on first use if none is running.
+
+- Default bind address: `127.0.0.1:7333`
+- Server log: `$TMPDIR/grns/server.log`
+- Run foreground: `grns srv`
+- Stop: `pkill -f "grns srv"`
+
+The server persists between CLI invocations. To force a clean state (e.g. before integration tests), kill the server process.
+
+## Configuration
 
 Config files (TOML):
 - Global: `$HOME/.grns.toml`
@@ -55,6 +125,8 @@ Supported config keys:
 - `GRNS_CONFIG_DIR` (override config file location; uses `$GRNS_CONFIG_DIR/.grns.toml`)
 - `GRNS_TRUST_PROJECT_CONFIG=true` (opt in to loading `./.grns.toml`; CLI prints a warning when this trusted project config is used)
 - `GRNS_DB_MAX_OPEN_CONNS`, `GRNS_DB_MAX_IDLE_CONNS`, `GRNS_DB_CONN_MAX_LIFETIME` (optional SQLite pool tuning)
+- `GRNS_ATTACH_ALLOWED_MEDIA_TYPES` (comma-separated MIME types to allow for uploads)
+- `GRNS_ATTACH_REJECT_MEDIA_TYPE_MISMATCH` (reject uploads where declared MIME differs from sniffed; default `true`)
 
 ### Security-related environment variables
 
@@ -131,7 +203,120 @@ grns config set <key> <value>
 grns srv
 ```
 
+### `create` flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--id` | | Explicit task ID (must match `<prefix>-<4char>` format) |
+| `--type` | `-t` | Task type (`bug`, `feature`, `task`, `epic`, `chore`) |
+| `--priority` | `-p` | Priority (0–4) |
+| `--description` | `-d` | Task description |
+| `--spec-id` | | Specification identifier |
+| `--parent` | | Parent task ID |
+| `--assignee` | | Assignee name |
+| `--notes` | | Free-text notes |
+| `--design` | | Design notes |
+| `--acceptance` | | Acceptance criteria |
+| `--source-repo` | | Source repository (`host/owner/repo`) |
+| `--label` | `-l` | Label (repeatable) |
+| `--labels` | | Labels (comma-separated) |
+| `--deps` | | Dependencies (comma-separated task IDs) |
+| `--file` | `-f` | Markdown file for batch create (see below) |
+| `--custom` | | Custom field `key=value` (repeatable) |
+| `--custom-json` | | Custom fields as JSON object |
+
+### `update` flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--title` | | New title |
+| `--status` | | New status |
+| `--type` | `-t` | New type |
+| `--priority` | `-p` | New priority |
+| `--description` | `-d` | New description |
+| `--spec-id` | | New spec ID |
+| `--parent` | | New parent ID |
+| `--assignee` | | New assignee |
+| `--notes` | | New notes |
+| `--design` | | New design |
+| `--acceptance` | | New acceptance criteria |
+| `--source-repo` | | New source repository |
+| `--custom` | | Custom field `key=value` (repeatable) |
+| `--custom-json` | | Custom fields as JSON object |
+
+### `list` filters
+
+| Flag | Description |
+|------|-------------|
+| `--status` | Filter by status (comma-separated for multiple) |
+| `--priority` | Exact priority |
+| `--priority-min` | Minimum priority (inclusive) |
+| `--priority-max` | Maximum priority (inclusive) |
+| `--type` | Filter by type |
+| `--label` | Tasks with all listed labels (AND) |
+| `--label-any` | Tasks with any listed label (OR) |
+| `--spec` | Spec ID regex (RE2, case-insensitive) |
+| `--parent` | Filter by parent ID |
+| `--assignee` | Filter by assignee |
+| `--no-assignee` | Unassigned tasks only |
+| `--id` | Filter by IDs (comma-separated) |
+| `--title-contains` | Title substring match |
+| `--desc-contains` | Description substring match |
+| `--notes-contains` | Notes substring match |
+| `--created-after` | Created after date (RFC3339 or YYYY-MM-DD) |
+| `--created-before` | Created before date |
+| `--updated-after` | Updated after date |
+| `--updated-before` | Updated before date |
+| `--closed-after` | Closed after date |
+| `--closed-before` | Closed before date |
+| `--empty-description` | Tasks with no description |
+| `--no-labels` | Tasks with no labels |
+| `--search` | Full-text search (FTS5, see below) |
+| `--limit` | Max results |
+| `--offset` | Skip N results |
+
+### Full-text search (`--search`)
+
+Uses SQLite FTS5 match syntax. Searches across `title`, `description`, and `notes`.
+
+```bash
+grns list --search "auth"                    # simple term
+grns list --search "auth login"              # both terms (implicit AND)
+grns list --search '"exact phrase"'          # phrase match
+grns list --search "auth*"                   # prefix match
+grns list --search "auth OR oauth"           # boolean OR
+grns list --search "auth NOT legacy"         # boolean NOT
+```
+
+### Batch create from markdown (`create -f`)
+
+Create multiple tasks from a markdown file with YAML front matter defaults:
+
+```bash
+grns create -f tasks.md --json
+```
+
+File format:
+
+```markdown
+---
+type: feature
+priority: 1
+labels: [auth, backend]
+assignee: alice
+---
+- Add login endpoint
+- Add token refresh
+- Add logout handler
+```
+
+Each list item (`-` or `*`) becomes a separate task. Front matter fields are applied as defaults to all tasks.
+
+Supported front matter keys: `type`, `priority`, `description`, `spec_id`, `status`, `parent_id`, `assignee`, `notes`, `design`, `acceptance_criteria`, `source_repo`, `labels`, `deps`.
+
 ## Import / Export
+
+See `docs/import-export.md` for the full guide.
 
 - `export` writes NDJSON (`application/x-ndjson`)
 - `export` does **not** support `--json` (to avoid ambiguity with JSON arrays)
@@ -148,6 +333,10 @@ Import failure semantics:
 - `--atomic` enables transactional apply per request (or per stream chunk).
 - Import responses include `apply_mode` and `applied_chunks` checkpoint metadata.
 - With `--orphan-handling strict`, orphan deps are counted as errors and affected dependency updates are skipped (task upserts may still apply).
+
+## API
+
+See `docs/api.md` for the full REST API reference.
 
 ## Build and test
 
@@ -171,3 +360,38 @@ Run command help for full flags:
 grns --help
 grns <command> --help
 ```
+
+## Troubleshooting
+
+**"Connection refused" or CLI hangs:**
+- Check if the server is running: `curl http://127.0.0.1:7333/health`
+- Verify `GRNS_API_URL` points to the right address
+- Try starting the server manually: `grns srv`
+- Check server logs: `$TMPDIR/grns/server.log`
+
+**Port already in use:**
+- Kill stale server: `pkill -f "grns srv"`
+- Check what is using the port: `lsof -i :7333`
+
+**Migration errors:**
+- Inspect migration state: `grns migrate --inspect`
+- Preview migrations: `grns migrate --dry-run`
+
+**Unexpected behavior after upgrade:**
+- Kill existing server (it may be running old code): `pkill -f "grns srv"`
+- Rebuild: `just build`
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [API Reference](docs/api.md) | REST API endpoints, request/response schemas |
+| [Import/Export Guide](docs/import-export.md) | JSONL format, dedupe modes, streaming |
+| [Design Doc](docs/design.md) | Architecture, data model, design decisions |
+| [Attachments Design](docs/attachments.md) | Attachment domain model and storage |
+| [Attachments Schema](docs/attachments-schema.md) | Schema, migration, store interfaces |
+| [Git References Design](docs/git-refs.md) | Task-to-git linking model |
+| [Error Codes Design](docs/errcode-design.md) | Numeric error code catalog |
+| [Security](docs/security.md) | Auth, config trust, hardening |
+| [Messaging Design](docs/messaging.md) | Future multi-agent broker design (not implemented) |
+| [Performance](docs/performance-go.md) | Benchmarks and regression budgets |

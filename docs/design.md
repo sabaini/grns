@@ -3,9 +3,11 @@
 ## Summary
 Grns is a lightweight issue tracker and memory system for agents, focused on durable tasks, dependencies, and recency. It exposes a CLI-first interface with machine-readable I/O and uses a REST API from the start: the CLI talks to a local server for single-user mode and the same server scales to multi-user deployments.
 
-Related design docs:
+Related docs:
+- [API Reference](api.md)
+- [Import/Export Guide](import-export.md)
 - [Attachments Design](attachments.md)
-- [Messaging Design](messaging.md)
+- [Messaging Design](messaging.md) (not yet implemented)
 - [Task ↔ Git References Design](git-refs.md)
 
 ## Problem Statement
@@ -14,9 +16,9 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 ## Goals
 - Support **single-user** installs with an embedded datastore.
 - Support **multi-user** deployments via a client–server architecture.
-- Provide **core task properties** plus **user-configurable fields** (post‑MVP).
+- Provide **core task properties** plus **user-configurable fields** (implemented: `custom` JSON column).
 - Deliver **fast** operations for common workflows (create/update/ready/stale queries).
-- Provide **machine-readable I/O** (JSON in MVP; YAML/TOML post‑MVP).
+- Provide **machine-readable I/O** (JSON; YAML/TOML deferred).
 - Work on **Linux** and **macOS**.
 
 ## MVP Scope
@@ -38,8 +40,8 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - Track dependencies (blocks/unblocks/parent-child).
 - Query “ready” tasks (no open blockers).
 - Query “stale” tasks by last-updated threshold.
-- Output results in JSON (YAML/TOML post-MVP). Full-database import/export (schema TBD) is post-MVP.
-- Post-MVP: support custom per-task fields (user-defined metadata).
+- Output results in JSON. Full-database import/export via NDJSON (implemented).
+- Custom per-task fields via `custom` JSON column (implemented).
 
 ### Non-Functional
 - Scale to ~100k tasks.
@@ -78,9 +80,9 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - `updated_at` changes on any mutation.
 - `closed_at` is set on close and cleared on reopen.
 
-### Extensible Fields (Post‑MVP)
-- A `custom` object or namespace per task to store user-defined fields (stored in a JSON column).
-- Prefer schema-validated custom fields for robustness (likely via a schema registry), while considering an optional free-form mode if needed.
+### Custom Fields (Implemented)
+- A `custom` JSON column per task stores user-defined key-value fields.
+- Free-form mode is the current implementation; schema-validated fields may follow.
 
 ## Architecture
 ### Single-User Mode (Embedded)
@@ -101,7 +103,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - **Internal storage (recommended):** SQLite in WAL mode with JSON1 for `custom` fields and FTS5 for text search (title/description/notes).
 - Tables: `tasks`, `task_labels`, `task_deps`; indexed by `status`, `priority`, `updated_at`, `spec_id`, `parent_id`, plus join indexes for labels/deps.
 - Regex filters (e.g., `list --spec`) are applied in the service layer using Go's `regexp` (RE2), case-insensitive by default, unless SQLite REGEXP is enabled.
-- **External I/O:** JSON for CLI output (YAML/TOML post‑MVP); full-database import/export post‑MVP.
+- **External I/O:** JSON for CLI output; NDJSON import/export (implemented).
 - **Attachments:** hybrid model—metadata in SQLite, blob bytes in managed blob storage; see [Attachments Design](attachments.md).
 
 ### Storage Rationale
@@ -153,15 +155,15 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - Index by status, updated_at, and dependency relationships.
 - Avoid full scans for ready/stale queries.
 
-## Extensibility (Post‑MVP)
-- **Custom fields:** `custom` JSON + schema registry for validated per‑team fields.
-- **Storage backends:** `Store` interface to support SQLite (MVP) and PostgreSQL later.
-- **Lifecycle hooks:** pre/post create/update/close events (exec or webhook).
-- **Output formats:** formatter interface for JSON (MVP), YAML/TOML later.
-- **Query plugins:** registry for custom filters (e.g., `filter=owner:team-a`).
-- **CLI plugins:** external `grns-<cmd>` binaries discovered on PATH.
-- **Auth middleware:** pluggable auth/ACL strategies for multi‑user servers.
-- **Import/Export:** importer/exporter registry for JSONL and future formats.
+## Extensibility
+- **Custom fields:** `custom` JSON column (implemented, free-form). Schema registry for validated per‑team fields is future work.
+- **Storage backends:** `Store` interface to support SQLite (current) and PostgreSQL later.
+- **Lifecycle hooks:** pre/post create/update/close events (exec or webhook) — not yet implemented.
+- **Output formats:** JSON (current). YAML/TOML deferred.
+- **Query plugins:** registry for custom filters — not yet implemented.
+- **CLI plugins:** external `grns-<cmd>` binaries discovered on PATH — not yet implemented.
+- **Auth middleware:** Bearer token and admin token auth (implemented). Pluggable ACL strategies for multi‑user servers are future work.
+- **Import/Export:** NDJSON import/export with streaming mode (implemented).
 
 ## Query Semantics
 - **Ready**: tasks with no blockers in statuses `open`, `in_progress`, `blocked`, `deferred`, or `pinned`.
@@ -180,7 +182,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - `tasks`: `id`, `title`, `status`, `type`, `priority`, `description`, `spec_id`, `parent_id`, `created_at`, `updated_at`, `closed_at`, `custom` (JSON).
 - `task_labels`: `task_id`, `label`.
 - `task_deps`: `child_id`, `parent_id`, `type`.
-- `custom` is reserved for post‑MVP fields (not exposed via CLI/API initially).
+- `custom` stores user-defined JSON fields (exposed via CLI `--custom` and API).
 
 ### Indexes
 - `tasks(status, updated_at)`
@@ -192,7 +194,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 
 ### Boot & Migrations
 - Set WAL mode on open.
-- Bootstrap schema creation for tables + indexes (migration framework post‑MVP).
+- Versioned migration framework with `schema_migrations` table (implemented, currently at v6).
 
 ### CLI Implementation Order
 1. `create` / `show`
