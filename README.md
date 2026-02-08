@@ -30,6 +30,8 @@ grns reopen <id> --json
 
 ## Configuration
 
+See `docs/config.md` for detailed examples.
+
 Config files (TOML):
 - Global: `$HOME/.grns.toml`
 - Project: `.grns.toml` in current workspace (**loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`**)
@@ -38,6 +40,11 @@ Supported config keys:
 - `project_prefix` (default: `gr`)
 - `api_url` (default: `http://127.0.0.1:7333`)
 - `db_path` (default: `.grns.db` in workspace)
+- `attachments.max_upload_bytes` (default: `104857600`)
+- `attachments.multipart_max_memory` (default: `8388608`)
+- `attachments.allowed_media_types` (default: empty)
+- `attachments.reject_media_type_mismatch` (default: `true`)
+- `attachments.gc_batch_size` (default: `500`)
 
 ### Environment overrides
 
@@ -89,7 +96,7 @@ grns update <id> [<id>...] [flags]
 grns list [filters]
 grns ready [--limit N]
 grns stale [--days N] [--status ...] [--limit N]
-grns close <id> [<id>...]
+grns close <id> [<id>...] [--commit <40hexsha>] [--repo <host/owner/repo>]
 grns reopen <id> [<id>...]
 
 grns dep add <child> <parent> [--type blocks]
@@ -104,7 +111,12 @@ grns attach add <task-id> <path> --kind <kind> [--title ...] [--media-type ...] 
 grns attach add-link <task-id> --kind <kind> [--url <https://...>|--repo-path <path>] [--media-type ...] [--label ...]
 grns attach list <task-id>
 grns attach show <attachment-id>
+grns attach get <attachment-id> -o <path> [--force]
 grns attach rm <attachment-id>
+
+grns git add <task-id> --relation <relation> --type <object_type> --value <object_value> [--repo <host/owner/repo>]
+grns git ls <task-id>
+grns git rm <git-ref-id>
 
 grns import -i tasks.jsonl [--dry-run] [--dedupe skip|overwrite|error] [--orphan-handling allow|skip|strict]
 grns import -i tasks.jsonl --stream   # streaming NDJSON import (recommended for large files)
@@ -112,6 +124,7 @@ grns export [-o tasks.jsonl]
 
 grns info
 grns admin cleanup --older-than N [--dry-run|--force]
+grns admin gc-blobs [--dry-run|--apply] [--batch-size N]
 grns migrate [--inspect|--dry-run]
 grns config get <key>
 grns config set <key> <value>

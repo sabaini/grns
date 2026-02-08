@@ -11,11 +11,31 @@ import (
 )
 
 var (
-	idRegex = regexp.MustCompile(`^[a-z]{2}-[0-9a-z]{4}$`)
+	idRegex           = regexp.MustCompile(`^[a-z]{2}-[0-9a-z]{4}$`)
+	attachmentIDRegex = regexp.MustCompile(`^at-[0-9a-z]{4}$`)
+	blobIDRegex       = regexp.MustCompile(`^bl-[0-9a-z]{4}$`)
+	gitRepoIDRegex    = regexp.MustCompile(`^rp-[0-9a-z]{4}$`)
+	gitRefIDRegex     = regexp.MustCompile(`^gf-[0-9a-z]{4}$`)
 )
 
 func validateID(id string) bool {
 	return idRegex.MatchString(id)
+}
+
+func validateAttachmentID(id string) bool {
+	return attachmentIDRegex.MatchString(id)
+}
+
+func validateBlobID(id string) bool {
+	return blobIDRegex.MatchString(id)
+}
+
+func validateGitRepoID(id string) bool {
+	return gitRepoIDRegex.MatchString(id)
+}
+
+func validateGitRefID(id string) bool {
+	return gitRefIDRegex.MatchString(id)
 }
 
 func normalizeStatus(value string) (string, error) {

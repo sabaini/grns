@@ -17,6 +17,18 @@ func TestDefault(t *testing.T) {
 	if cfg.DBPath != "" {
 		t.Fatalf("expected empty db path, got %q", cfg.DBPath)
 	}
+	if cfg.Attachments.MaxUploadBytes != DefaultAttachmentMaxUploadBytes {
+		t.Fatalf("expected attachment max upload default %d, got %d", DefaultAttachmentMaxUploadBytes, cfg.Attachments.MaxUploadBytes)
+	}
+	if cfg.Attachments.MultipartMaxMemory != DefaultAttachmentMultipartMemory {
+		t.Fatalf("expected attachment multipart default %d, got %d", DefaultAttachmentMultipartMemory, cfg.Attachments.MultipartMaxMemory)
+	}
+	if !cfg.Attachments.RejectMediaTypeMismatch {
+		t.Fatal("expected attachment reject mismatch default true")
+	}
+	if cfg.Attachments.GCBatchSize != DefaultAttachmentGCBatchSize {
+		t.Fatalf("expected attachment gc batch default %d, got %d", DefaultAttachmentGCBatchSize, cfg.Attachments.GCBatchSize)
+	}
 }
 
 func TestLoadFile(t *testing.T) {
@@ -51,7 +63,16 @@ func TestLoadFileMissing(t *testing.T) {
 }
 
 func TestIsAllowedKey(t *testing.T) {
-	for _, key := range []string{"project_prefix", "api_url", "db_path"} {
+	for _, key := range []string{
+		"project_prefix",
+		"api_url",
+		"db_path",
+		"attachments.max_upload_bytes",
+		"attachments.multipart_max_memory",
+		"attachments.allowed_media_types",
+		"attachments.reject_media_type_mismatch",
+		"attachments.gc_batch_size",
+	} {
 		if !IsAllowedKey(key) {
 			t.Fatalf("expected %q to be allowed", key)
 		}
@@ -62,7 +83,18 @@ func TestIsAllowedKey(t *testing.T) {
 }
 
 func TestGetKey(t *testing.T) {
-	cfg := Config{ProjectPrefix: "xx", APIURL: "http://test:1234", DBPath: "/tmp/test.db"}
+	cfg := Config{
+		ProjectPrefix: "xx",
+		APIURL:        "http://test:1234",
+		DBPath:        "/tmp/test.db",
+		Attachments: AttachmentConfig{
+			MaxUploadBytes:          123,
+			MultipartMaxMemory:      456,
+			AllowedMediaTypes:       []string{"application/pdf", "text/plain"},
+			RejectMediaTypeMismatch: false,
+			GCBatchSize:             789,
+		},
+	}
 
 	val, err := cfg.Get("project_prefix")
 	if err != nil || val != "xx" {
@@ -75,6 +107,26 @@ func TestGetKey(t *testing.T) {
 	val, err = cfg.Get("db_path")
 	if err != nil || val != "/tmp/test.db" {
 		t.Fatalf("expected db_path, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("attachments.max_upload_bytes")
+	if err != nil || val != "123" {
+		t.Fatalf("expected attachments.max_upload_bytes, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("attachments.multipart_max_memory")
+	if err != nil || val != "456" {
+		t.Fatalf("expected attachments.multipart_max_memory, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("attachments.allowed_media_types")
+	if err != nil || val != "application/pdf,text/plain" {
+		t.Fatalf("expected attachments.allowed_media_types, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("attachments.reject_media_type_mismatch")
+	if err != nil || val != "false" {
+		t.Fatalf("expected attachments.reject_media_type_mismatch, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("attachments.gc_batch_size")
+	if err != nil || val != "789" {
+		t.Fatalf("expected attachments.gc_batch_size, got %q (err: %v)", val, err)
 	}
 	_, err = cfg.Get("invalid")
 	if err == nil {
@@ -123,6 +175,21 @@ func TestSetKeyInvalidKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.toml")
 	if err := SetKey(path, "invalid_key", "value"); err == nil {
 		t.Fatal("expected error for invalid key")
+	}
+}
+
+func TestSetNestedAttachmentKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attachments.toml")
+	if err := SetKey(path, "attachments.gc_batch_size", "321"); err != nil {
+		t.Fatalf("set nested key: %v", err)
+	}
+
+	cfg := Default()
+	if err := loadFile(path, &cfg); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Attachments.GCBatchSize != 321 {
+		t.Fatalf("expected gc_batch_size 321, got %d", cfg.Attachments.GCBatchSize)
 	}
 }
 

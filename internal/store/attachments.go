@@ -47,29 +47,7 @@ func (s *Store) CreateAttachment(ctx context.Context, attachment *models.Attachm
 		}
 	}()
 
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO attachments (
-			id, task_id, kind, source_type, title, filename, media_type, media_type_source,
-			blob_id, external_url, repo_path, meta_json, created_at, updated_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		attachment.ID,
-		attachment.TaskID,
-		attachment.Kind,
-		attachment.SourceType,
-		nullIfEmpty(strings.TrimSpace(attachment.Title)),
-		nullIfEmpty(strings.TrimSpace(attachment.Filename)),
-		nullIfEmpty(strings.TrimSpace(attachment.MediaType)),
-		attachment.MediaTypeSource,
-		nullIfEmpty(strings.TrimSpace(attachment.BlobID)),
-		nullIfEmpty(strings.TrimSpace(attachment.ExternalURL)),
-		nullIfEmpty(strings.TrimSpace(attachment.RepoPath)),
-		metaJSON,
-		dbFormatTime(attachment.CreatedAt),
-		dbFormatTime(attachment.UpdatedAt),
-		nullTime(attachment.ExpiresAt),
-	)
-	if err != nil {
+	if err := insertAttachmentRowTx(ctx, tx, attachment, metaJSON); err != nil {
 		return err
 	}
 
@@ -223,6 +201,100 @@ func (s *Store) UpsertBlob(ctx context.Context, blob *models.Blob) (*models.Blob
 	return s.GetBlobBySHA256(ctx, blob.SHA256)
 }
 
+// CreateManagedAttachmentWithBlob upserts blob metadata and creates attachment rows in one transaction.
+func (s *Store) CreateManagedAttachmentWithBlob(ctx context.Context, blob *models.Blob, attachment *models.Attachment) (_ *models.Blob, err error) {
+	if blob == nil {
+		return nil, fmt.Errorf("blob is required")
+	}
+	if attachment == nil {
+		return nil, fmt.Errorf("attachment is required")
+	}
+
+	blob.SHA256 = strings.ToLower(strings.TrimSpace(blob.SHA256))
+	blob.BlobKey = strings.TrimSpace(blob.BlobKey)
+	if blob.SHA256 == "" {
+		return nil, fmt.Errorf("sha256 is required")
+	}
+	if blob.BlobKey == "" {
+		return nil, fmt.Errorf("blob_key is required")
+	}
+	if blob.SizeBytes < 0 {
+		return nil, fmt.Errorf("size_bytes must be >= 0")
+	}
+	if strings.TrimSpace(blob.StorageBackend) == "" {
+		blob.StorageBackend = "local_cas"
+	}
+	if blob.CreatedAt.IsZero() {
+		blob.CreatedAt = time.Now().UTC()
+	}
+
+	now := time.Now().UTC()
+	if attachment.CreatedAt.IsZero() {
+		attachment.CreatedAt = now
+	}
+	if attachment.UpdatedAt.IsZero() {
+		attachment.UpdatedAt = attachment.CreatedAt
+	}
+	if strings.TrimSpace(attachment.MediaTypeSource) == "" {
+		attachment.MediaTypeSource = string(models.MediaTypeSourceUnknown)
+	}
+
+	metaJSON, err := attachmentMetaToJSON(attachment.Meta)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if strings.TrimSpace(blob.ID) == "" {
+		generated, genErr := GenerateBlobID(func(id string) (bool, error) {
+			return s.blobIDExistsTx(ctx, tx, id)
+		})
+		if genErr != nil {
+			err = genErr
+			return nil, err
+		}
+		blob.ID = generated
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO blobs (id, sha256, size_bytes, storage_backend, blob_key, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, blob.ID, blob.SHA256, blob.SizeBytes, blob.StorageBackend, blob.BlobKey, dbFormatTime(blob.CreatedAt)); err != nil {
+		return nil, err
+	}
+
+	canonicalBlob, err := scanBlob(tx.QueryRowContext(ctx, `SELECT `+blobColumns+` FROM blobs WHERE sha256 = ?`, blob.SHA256))
+	if err != nil {
+		return nil, err
+	}
+	if canonicalBlob == nil {
+		return nil, fmt.Errorf("blob not found after upsert")
+	}
+
+	attachment.BlobID = canonicalBlob.ID
+	if err := insertAttachmentRowTx(ctx, tx, attachment, metaJSON); err != nil {
+		return nil, err
+	}
+	if err := insertAttachmentLabelsTx(ctx, tx, attachment.ID, normalizeAttachmentLabels(attachment.Labels)); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return canonicalBlob, nil
+}
+
 // GetBlob returns one blob by id.
 func (s *Store) GetBlob(ctx context.Context, id string) (*models.Blob, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT `+blobColumns+` FROM blobs WHERE id = ?`, id)
@@ -238,10 +310,10 @@ func (s *Store) GetBlobBySHA256(ctx context.Context, sha string) (*models.Blob, 
 // ListUnreferencedBlobs returns blobs that are not referenced by attachments.
 func (s *Store) ListUnreferencedBlobs(ctx context.Context, limit int) ([]models.Blob, error) {
 	query := `
-		SELECT ` + blobColumns + `
+		SELECT b.id, b.sha256, b.size_bytes, b.storage_backend, b.blob_key, b.created_at
 		FROM blobs b
 		LEFT JOIN attachments a ON a.blob_id = b.id
-		WHERE a.blob_id IS NULL
+		WHERE a.id IS NULL
 		ORDER BY b.created_at ASC`
 	args := []any{}
 	if limit > 0 {
@@ -287,6 +359,44 @@ func (s *Store) blobIDExists(ctx context.Context, id string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Store) blobIDExistsTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM blobs WHERE id = ? LIMIT 1", id).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func insertAttachmentRowTx(ctx context.Context, tx *sql.Tx, attachment *models.Attachment, metaJSON any) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO attachments (
+			id, task_id, kind, source_type, title, filename, media_type, media_type_source,
+			blob_id, external_url, repo_path, meta_json, created_at, updated_at, expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		attachment.ID,
+		attachment.TaskID,
+		attachment.Kind,
+		attachment.SourceType,
+		nullIfEmpty(strings.TrimSpace(attachment.Title)),
+		nullIfEmpty(strings.TrimSpace(attachment.Filename)),
+		nullIfEmpty(strings.TrimSpace(attachment.MediaType)),
+		attachment.MediaTypeSource,
+		nullIfEmpty(strings.TrimSpace(attachment.BlobID)),
+		nullIfEmpty(strings.TrimSpace(attachment.ExternalURL)),
+		nullIfEmpty(strings.TrimSpace(attachment.RepoPath)),
+		metaJSON,
+		dbFormatTime(attachment.CreatedAt),
+		dbFormatTime(attachment.UpdatedAt),
+		nullTime(attachment.ExpiresAt),
+	)
+	return err
 }
 
 func scanAttachment(scanner interface {

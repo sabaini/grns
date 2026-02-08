@@ -1,336 +1,196 @@
-# Grns Attachments Design (Draft)
+# Grns Attachments MVP Design
 
-## Summary
-Grns should support task/epic attachments (specs, diagrams, artifacts, diagnostics archives) with a **hybrid storage model**:
+## Purpose
+This document defines the **final MVP design** for attachments. It is intentionally narrow and removes open design choices.
 
-- **SQLite stores metadata and relationships**.
-- **Blob bytes live outside SQLite** in a managed blob store.
-- Attachments can reference either a managed blob or an external link/repo path.
-
-This preserves fast task queries and keeps blob growth/retention manageable.
-
-Related follow-up:
-- [Attachments Schema & Migration Plan](attachments-schema.md)
+Related: [Attachments Schema & Migration Plan](attachments-schema.md)
 
 ---
 
-## Why this design
-Storing large files directly in SQLite BLOB columns would increase WAL/database growth, make backups heavier, and complicate GC/retention. A metadata + blob-store split is a better fit for Grns’s architecture (CLI → REST → service layer → store).
+## MVP scope
+Grns supports task attachments with a hybrid model:
 
----
+- SQLite stores attachment/blob metadata and relationships.
+- Blob bytes are stored outside SQLite in a local content-addressed store (CAS).
+- Attachments can be either:
+  - managed uploads (`managed_blob`), or
+  - external references (`external_url`, `repo_path`).
 
-## MVP goals
-- First-class attachment records linked to tasks (including epics).
-- Managed uploads and external references.
-- Safe defaults for untrusted archives.
-- Predictable CLI/API behavior with JSON output.
-- Clear retention + GC lifecycle.
-
-## Non-goals (MVP)
-- Preview/render pipelines.
-- Full-text indexing of binary contents.
-- Cross-task sharing UI.
-- Object-storage backends (S3, etc.) in MVP.
-- Presigned URL workflows.
-
----
-
-## Core design decisions
-1. **Separate attachment reference from blob object**.
-2. **Immutable managed blobs** (content-addressed by SHA-256).
-3. **Use 3-axis classification for attachments**:
-   - `source_type` (where it comes from)
-   - `media_type` (what bytes it is; MIME)
-   - `kind` + `labels` (what it means in workflow)
-4. **Service-layer orchestration** (handlers never call store/blob backends directly).
-5. **Archive safety by default** (opaque storage first; optional inspection later).
-6. **Keep MVP narrow**; advanced indexing and storage backends are follow-on phases.
+### Non-goals (MVP)
+- Archive extraction/inspection
+- Preview/render/indexing
+- Remote object stores (S3, etc.)
+- Cross-task shared attachment UX
+- Background GC daemon
 
 ---
 
 ## Domain model
 
 ### Attachment (user-facing reference)
-Represents “what is attached to task X”.
+Represents “this task has this artifact”.
 
-Fields:
-- `id` (`at-...`)
+Core fields:
+- `id` (`at-xxxx`)
 - `task_id`
-- `kind` (`spec`, `diagram`, `artifact`, `diagnostic`, `archive`, `other`)
-- `source_type` (`managed_blob`, `external_url`, `repo_path`)
-- `title` (optional)
-- `filename` (optional)
-- `media_type` (optional, normalized MIME; e.g. `application/pdf`, `image/png`)
-- `media_type_source` (`sniffed`, `declared`, `inferred`, `unknown`)
-- `blob_id` (nullable; set when `source_type=managed_blob`)
-- `external_url` (nullable)
-- `repo_path` (nullable)
-- `meta_json` (nullable, constrained keys)
-- `labels` (0..N label tags via `attachment_labels` table)
-- `created_at`, `updated_at`
-- `expires_at` (nullable)
+- `kind` (`spec|diagram|artifact|diagnostic|archive|other`)
+- `source_type` (`managed_blob|external_url|repo_path`)
+- `title`, `filename`
+- `media_type` (normalized lowercase MIME)
+- `media_type_source` (`sniffed|declared|inferred|unknown` in MVP)
+- exactly one source payload:
+  - `blob_id` OR `external_url` OR `repo_path`
+- `meta_json` (opaque JSON object)
+- `labels[]` (normalized lowercase, deduped)
+- `created_at`, `updated_at`, `expires_at`
 
-Rules:
-- `kind` is intentionally coarse and describes domain intent, not transport/storage.
-- `labels` are free-form workflow tags (many-to-many), lowercased and deduped.
-- `media_type` is technical content identity and should not be overloaded as domain intent.
-- Exactly one source path:
-  - managed blob via `blob_id`, or
-  - `external_url`, or
-  - `repo_path`.
-
-### Blob (internal object)
-Represents immutable stored bytes.
+### Blob (internal immutable object)
+Represents raw bytes.
 
 Fields:
-- `id` (`bl-...`)
-- `sha256` (unique)
+- `id` (`bl-xxxx`)
+- `sha256` (64-char lowercase hex, unique)
 - `size_bytes`
-- `storage_backend` (`local_cas` in MVP)
-- `blob_key` (backend-specific key/path)
+- `storage_backend` (`local_cas`)
+- `blob_key` (`sha256/ab/cd/<full_sha256>`)
 - `created_at`
 
-Benefits:
-- Cleaner dedupe semantics.
-- Clear GC ownership model.
-- Easier future backend migration.
-
-### Suggested tables
-- `attachments`
-- `blobs`
-- `attachment_labels`
-
-Indexes:
-- `attachments(task_id, created_at)`
-- `attachments(kind)`
-- `attachments(media_type)`
-- `attachments(source_type)`
-- `attachments(expires_at)`
-- `attachment_labels(label)`
-- `attachment_labels(attachment_id, label)` unique
-- `blobs(sha256)` unique
-
 ---
 
-## Service boundaries and interfaces
+## Naming and boundary decisions (locked)
 
-### Handler layer
-- Parse request and content type.
-- Call service methods.
-- Return JSON/errors.
+1. **`kind` is domain intent**, not media format.
+2. **`media_type` is technical MIME**, not workflow meaning.
+3. Keep task and attachment concerns separate:
+   - handlers call `AttachmentService`
+   - `AttachmentService` calls metadata store + blob store
+4. **One metadata interface in MVP** (`AttachmentStore`) is acceptable for simplicity, but raw bytes stay behind a separate `BlobStore`.
+5. No source dedupe for links in MVP (same URL/path can be attached multiple times).
 
-### Service layer
-Create `AttachmentService` (in `internal/server`) for attachment workflows.
-- Validate input and policy limits.
-- Check task existence.
-- Coordinate store + blob store.
-- Map errors to API error types.
-
-This avoids overloading `TaskService` and keeps SRP clean.
-
-### Store interfaces
-Add dedicated `AttachmentStore` interface (do not bloat `TaskStore`).
-
-Suggested split:
-- `TaskStore`: task CRUD/query only.
-- `AttachmentStore`: attachment/blob metadata CRUD/query.
-- `BlobStore`: byte read/write/delete abstraction.
-
-Dependency direction:
+Dependency flow:
 
 ```
-handlers -> AttachmentService -> (AttachmentStore + BlobStore)
+HTTP handlers -> AttachmentService -> (AttachmentStore + BlobStore)
 ```
 
-`BlobStore` must not depend on task or HTTP concerns.
+No handler may call store/blobstore directly.
 
 ---
 
-## Blob storage strategy (MVP)
+## Storage strategy (MVP)
 
-### Local content-addressed store
-- Root: `.grns/blobs/sha256/`
-- Path: `.grns/blobs/sha256/ab/cd/<full_sha256>`
-- Write flow:
-  1. stream request to temp file
-  2. compute `sha256` + `size_bytes`
-  3. enforce upload limit
-  4. atomically move to CAS path if not present
-  5. upsert/find `blobs` row by digest
+### Local CAS layout
+- Root: `.grns/blobs/`
+- Key format: `sha256/ab/cd/<sha256>`
+- Absolute filesystem path is derived at runtime (not stored in DB).
 
----
+### Managed upload flow
+1. Validate task id/kind/labels/policy.
+2. Verify task exists.
+3. Stream content to blob store (`Put`) while hashing.
+4. In DB transaction:
+   - upsert blob metadata by SHA-256
+   - insert attachment row
+   - insert labels
+5. Return hydrated attachment.
 
-## MIME + label normalization policy (MVP)
-
-### Managed uploads (`source_type=managed_blob`)
-- Detect `media_type` from bytes first (`http.DetectContentType`-style sniffing).
-- If user explicitly provides `--media-type`, keep it only when compatible with detected type class; otherwise reject.
-- Record `media_type_source=sniffed` (or `declared` when explicit override is accepted).
-
-### Links and repo paths
-- `media_type` may be omitted.
-- If provided by user, store normalized lowercase MIME and mark `media_type_source=declared`.
-- Optional best-effort inference from filename/URL extension can set `media_type_source=inferred`.
-
-### Labels
-- Normalize to lowercase.
-- Deduplicate per attachment.
-- Validate as ASCII/non-space (same constraints as task labels in MVP).
+If blob write succeeds but DB transaction fails, blob is an orphan candidate and is cleaned by GC.
 
 ---
 
-## Data/control flow (explicit)
+## MIME policy (MVP, locked)
 
-### A) Upload managed attachment
-1. Handler parses multipart.
-2. `AttachmentService.CreateManaged(...)` validates kind/task/labels/policy.
-3. Service calls `BlobStore.Put(stream)` -> returns `{sha256, size_bytes, blob_key}`.
-4. Service determines normalized `media_type` and `media_type_source`.
-5. Service upserts/fetches `blobs` row.
-6. Service inserts `attachments` row referencing `blob_id`.
-7. Service writes `attachment_labels` rows.
-8. Return attachment metadata.
+### Managed uploads
+- Sniff MIME from bytes (`http.DetectContentType` behavior).
+- If client did not provide `media_type`:
+  - store sniffed MIME
+  - `media_type_source=sniffed`
+- If client provided `media_type`:
+  - normalize lowercase, strip params for comparison
+  - if sniffed type is not `application/octet-stream` and differs, reject (`badRequest`)
+  - otherwise accept declared MIME
+  - `media_type_source=declared`
 
-Failure handling:
-- If blob write succeeds but DB insert fails: mark blob as orphan-candidate; GC reclaims later.
-- If DB fails before attachment insert: no visible attachment record is created.
+### Links/repo paths
+- No sniffing.
+- If `media_type` provided, store as lowercase and mark `declared`.
+- If omitted, leave null and mark `unknown`.
 
-### B) Create external reference
-1. Handler parses JSON.
-2. `AttachmentService.CreateLink(...)` validates URL/path/labels.
-3. Normalize optional `media_type` (or infer best-effort from URL/path extension).
-4. Insert `attachments` row with `source_type=external_url|repo_path`.
-5. Insert `attachment_labels` rows.
-
-### C) Delete attachment
-1. Soft-delete is **not required in MVP**; hard delete metadata row.
-2. Blob bytes are not deleted synchronously.
-3. GC removes unreferenced blob objects.
-
-### D) Download managed content
-1. Resolve attachment and ensure `source_type=managed_blob`.
-2. Resolve blob metadata.
-3. Stream bytes from `BlobStore`.
+Allowed-media policy (if configured) applies to final normalized `media_type` when non-empty.
 
 ---
 
-## Archive handling
+## Validation policy (MVP, locked)
 
-### MVP
-- Treat archives (`zip`, `tar`, `tar.gz`) as opaque managed blobs.
-- No auto-extraction.
-- Optional archive inspection is deferred.
-
-### Phase 2 hardening
-- Add optional manifest extraction with strict limits.
-- Validation should reject dangerous paths (`..`, absolute paths, symlink escapes).
-
----
-
-## API shape (proposed)
-
-Base: `/v1`
-
-- `POST /tasks/{id}/attachments` (multipart upload)
-- `POST /tasks/{id}/attachments/link` (JSON external reference)
-- `GET /tasks/{id}/attachments`
-- `GET /attachments/{attachment_id}`
-- `GET /attachments/{attachment_id}/content`
-- `DELETE /attachments/{attachment_id}`
-
-Create payload notes:
-- Managed upload accepts optional `media_type` and `labels[]`.
-- Link creation accepts optional `media_type` and `labels[]` in addition to URL/path.
-- List/show responses include normalized `media_type`, `media_type_source`, and `labels[]`.
-
-Rationale for split create endpoints:
-- simpler validation/parsing paths
-- less content-type ambiguity
-- cleaner handler logic
+- Task IDs: existing task regex (`^[a-z]{2}-[0-9a-z]{4}$`).
+- Attachment IDs: `^at-[0-9a-z]{4}$`.
+- Blob IDs: `^bl-[0-9a-z]{4}$`.
+- Labels: reuse existing `normalizeLabels` rules (ASCII non-space, lowercase, deduped).
+- `repo_path` must be workspace-relative:
+  - not absolute
+  - must not escape via `..`
+- `external_url` must be valid absolute `http` or `https` URL.
 
 ---
 
-## CLI shape (proposed)
+## API (MVP)
 
-- `grns attach add <task-id> <path> --kind <kind> [--title ...] [--expires-at ...] [--media-type ...] [--label ...]...`
-- `grns attach add-link <task-id> --kind <kind> --url <https://...> [--media-type ...] [--label ...]...`
-- `grns attach add-link <task-id> --kind <kind> --repo-path <path> [--media-type ...] [--label ...]...`
-- `grns attach list <task-id> [--json]`
-- `grns attach show <attachment-id> [--json]`
+- `POST /v1/tasks/{id}/attachments` (multipart managed upload)
+- `POST /v1/tasks/{id}/attachments/link` (JSON link/path)
+- `GET /v1/tasks/{id}/attachments`
+- `GET /v1/attachments/{attachment_id}`
+- `GET /v1/attachments/{attachment_id}/content` (managed only)
+- `DELETE /v1/attachments/{attachment_id}`
+- `POST /v1/admin/gc-blobs` (admin; dry-run/apply)
+
+Create endpoints stay split to avoid content-type ambiguity.
+
+---
+
+## CLI (MVP)
+
+- `grns attach add <task-id> <path> --kind ...`
+- `grns attach add-link <task-id> --kind ... --url ...|--repo-path ...`
+- `grns attach list <task-id>`
+- `grns attach show <attachment-id>`
 - `grns attach get <attachment-id> -o <path>`
 - `grns attach rm <attachment-id>`
+- `grns admin gc-blobs --dry-run|--apply`
 
 ---
 
-## Config (explicit, no magic numbers)
+## Config defaults (with rationale)
 
-Recommended keys:
-- `attachments.max_upload_bytes` (default: `104857600` = 100 MiB)
-- `attachments.allowed_media_types` (default: empty = allow all)
-- `attachments.allowed_archive_types` (default: `zip,tar,tar.gz`)
-- `attachments.reject_media_type_mismatch` (default: `true` for managed uploads)
-- `attachments.gc_interval` (default: `24h`)
-- `attachments.enable_archive_inspection` (default: `false` in MVP)
+- `attachments.max_upload_bytes = 104857600` (100 MiB)
+  - caps abuse and large accidental uploads
+- `attachments.multipart_max_memory = 8388608` (8 MiB)
+  - bounds in-memory multipart buffering
+- `attachments.allowed_media_types = []` (allow all)
+- `attachments.reject_media_type_mismatch = true`
+- `attachments.gc_batch_size = 500`
+  - avoids long DB/file-system lock windows
 
-Phase 2 archive-inspection limits:
-- `attachments.archive.max_entries`
-- `attachments.archive.max_total_unpacked_bytes`
-- `attachments.archive.max_path_length`
+No `gc_interval` in MVP because GC is command-driven only.
 
 ---
 
-## Retention and GC
+## Retention + GC
 
-### Policy
-- `expires_at` allows ephemeral artifact retention.
-- Expired attachments can be removed by admin command/policy.
+- Deleting attachment removes metadata row only.
+- Blob bytes are reclaimed later by GC when unreferenced.
+- `expires_at` is metadata only in MVP (no automatic expiry worker).
 
-### GC command
-- `grns admin gc-blobs --dry-run`
-- `grns admin gc-blobs --apply`
-
-GC responsibilities:
-- Find blob rows with zero referencing attachments.
-- Delete underlying blob objects.
-- Delete orphan blob metadata rows.
-- Report reclaimed bytes/counts in JSON.
+GC command behavior:
+1. Query unreferenced blobs.
+2. Delete bytes by `blob_key`.
+3. Delete blob metadata row.
+4. Return summary: `candidate_count`, `deleted_count`, `failed_count`, `reclaimed_bytes`, `dry_run`.
 
 ---
 
-## Rollout plan
+## Why this complexity is justified
 
-### Phase 1 (MVP)
-1. Migration: add `attachments` + `blobs` + `attachment_labels` tables and indexes.
-2. Implement `AttachmentStore` and `BlobStore(local_cas)`.
-3. Implement `AttachmentService` + handlers + CLI commands.
-4. Implement GC command for unreferenced blobs.
-5. Tests:
-   - service validation/error mapping
-   - store CRUD/list
-   - upload/download/delete integration
-   - GC correctness
-
-### Phase 2
-- Optional archive inspection + manifest metadata.
-- Additional retention policies.
-
-### Phase 3
-- Pluggable remote blob backends (S3-compatible, etc.).
-
----
-
-## Design quality check (self-assessment)
-- **Understandable for new team members:** yes, with explicit service/interface boundaries and flow definitions.
-- **Matches domain:** yes, separates “attachment reference” from “blob object”.
-- **Complexity justified:** yes for hybrid storage; advanced features intentionally deferred.
-
----
-
-## Recommendation
-Proceed with the narrowed MVP above:
-- explicit `AttachmentService`
-- separate `attachments`, `blobs`, and `attachment_labels` metadata
-- 3-axis classification (`kind` + `labels` + `media_type`)
-- local CAS `BlobStore`
-- explicit failure/GC lifecycle
-- defer non-essential advanced features.
+- Keeps task queries fast and DB small.
+- Gives deterministic dedupe via SHA-256.
+- Makes failures recoverable via explicit GC.
+- Keeps advanced features out of MVP.

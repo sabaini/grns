@@ -183,6 +183,48 @@ CREATE INDEX IF NOT EXISTS idx_attachments_expires_at ON attachments(expires_at)
 CREATE INDEX IF NOT EXISTS idx_attachment_labels_label ON attachment_labels(label);
 `,
 	},
+	{
+		Version:     6,
+		Description: "git refs: add git_repos and task_git_refs tables",
+		SQL: `
+CREATE TABLE IF NOT EXISTS git_repos (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  default_branch TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_git_refs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  relation TEXT NOT NULL,
+  object_type TEXT NOT NULL,
+  object_value TEXT NOT NULL,
+  resolved_commit TEXT,
+  note TEXT,
+  meta_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (repo_id) REFERENCES git_repos(id) ON DELETE RESTRICT,
+  CHECK (object_type IN ('commit', 'tag', 'branch', 'path', 'blob', 'tree')),
+  CHECK (length(trim(object_value)) > 0),
+  CHECK (
+    resolved_commit IS NULL OR
+    (length(resolved_commit) = 40 AND lower(resolved_commit) = resolved_commit AND resolved_commit GLOB '[0-9a-f]*')
+  )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_task_git_refs_dedupe
+  ON task_git_refs(task_id, repo_id, relation, object_type, object_value, ifnull(resolved_commit, ''));
+
+CREATE INDEX IF NOT EXISTS idx_task_git_refs_task_created ON task_git_refs(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_git_refs_repo_object ON task_git_refs(repo_id, object_type, object_value);
+CREATE INDEX IF NOT EXISTS idx_task_git_refs_relation ON task_git_refs(relation);
+`,
+	},
 }
 
 const migrationsTableSQL = `

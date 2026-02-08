@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"grns/internal/blobstore"
 	"grns/internal/config"
 	"grns/internal/server"
 	"grns/internal/store"
@@ -37,7 +39,20 @@ func newSrvCmd(cfg *config.Config) *cobra.Command {
 			}
 			defer st.Close()
 
-			srv := server.New(addr, st, cfg.ProjectPrefix, logger)
+			blobRoot := filepath.Join(filepath.Dir(cfg.DBPath), ".grns", "blobs")
+			bs, err := blobstore.NewLocalCAS(blobRoot)
+			if err != nil {
+				return err
+			}
+
+			srv := server.New(addr, st, cfg.ProjectPrefix, logger, bs)
+			srv.ConfigureAttachmentOptions(server.AttachmentOptions{
+				MaxUploadBytes:          cfg.Attachments.MaxUploadBytes,
+				MultipartMaxMemory:      cfg.Attachments.MultipartMaxMemory,
+				AllowedMediaTypes:       cfg.Attachments.AllowedMediaTypes,
+				RejectMediaTypeMismatch: cfg.Attachments.RejectMediaTypeMismatch,
+				GCBatchSize:             cfg.Attachments.GCBatchSize,
+			})
 			return srv.ListenAndServe()
 		},
 	}

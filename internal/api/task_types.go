@@ -68,7 +68,9 @@ type CleanupResponse struct {
 
 // TaskCloseRequest defines the payload for closing tasks.
 type TaskCloseRequest struct {
-	IDs []string `json:"ids"`
+	IDs    []string `json:"ids"`
+	Commit string   `json:"commit,omitempty"`
+	Repo   string   `json:"repo,omitempty"`
 }
 
 // TaskReopenRequest defines the payload for reopening tasks.

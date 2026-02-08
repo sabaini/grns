@@ -49,6 +49,16 @@ func GenerateBlobID(exists func(string) (bool, error)) (string, error) {
 	return GenerateID("bl", exists)
 }
 
+// GenerateGitRepoID returns a new git repo id using the rp- prefix.
+func GenerateGitRepoID(exists func(string) (bool, error)) (string, error) {
+	return GenerateID("rp", exists)
+}
+
+// GenerateTaskGitRefID returns a new task git ref id using the gf- prefix.
+func GenerateTaskGitRefID(exists func(string) (bool, error)) (string, error) {
+	return GenerateID("gf", exists)
+}
+
 func randomBase36(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {

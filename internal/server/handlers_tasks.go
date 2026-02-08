@@ -1,24 +1,60 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"grns/internal/api"
 )
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
-	ids, ok := s.decodeIDsReq(w, r)
-	if !ok {
+	var req api.TaskCloseRequest
+	if !s.decodeJSONReq(w, r, &req) {
+		return
+	}
+	if err := requireIDs(req.IDs); err != nil {
+		s.writeErrorReq(w, r, http.StatusBadRequest, err)
 		return
 	}
 
-	if err := s.service.Close(r.Context(), ids); err != nil {
-		s.writeServiceError(w, r, err)
+	commit := strings.TrimSpace(req.Commit)
+	repo := strings.TrimSpace(req.Repo)
+	if repo != "" && commit == "" {
+		s.writeErrorReq(w, r, http.StatusBadRequest, badRequestCode(fmt.Errorf("commit is required when repo is provided"), ErrCodeMissingRequired))
 		return
 	}
+	if commit != "" {
+		normalized, err := normalizeGitHash(commit, "commit")
+		if err != nil {
+			s.writeErrorReq(w, r, http.StatusBadRequest, err)
+			return
+		}
+		commit = normalized
+	}
 
-	s.writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
+	annotated := 0
+	if commit == "" {
+		if err := s.service.Close(r.Context(), req.IDs); err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	} else {
+		var err error
+		annotated, err = s.service.CloseWithCommit(r.Context(), req.IDs, commit, repo)
+		if err != nil {
+			s.writeServiceError(w, r, err)
+			return
+		}
+	}
+
+	resp := map[string]any{"ids": req.IDs}
+	if commit != "" {
+		resp["commit"] = commit
+		resp["annotated"] = annotated
+	}
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {

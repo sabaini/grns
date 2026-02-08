@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"grns/internal/api"
@@ -152,9 +155,51 @@ func TestAttachmentManagedUploadHandler(t *testing.T) {
 	}
 }
 
-func TestAttachmentContentNotImplemented(t *testing.T) {
+func TestAttachmentContentManaged(t *testing.T) {
 	srv := newListTestServer(t)
 	seedListTask(t, srv, "gr-ac01", "content task", 2)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("kind", string(models.AttachmentKindArtifact))
+	part, err := writer.CreateFormFile("content", "artifact.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("hello attachment content")); err != nil {
+		t.Fatalf("write form content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-ac01/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var created models.Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode attachment: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID+"/content", nil)
+	w = httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != "hello attachment content" {
+		t.Fatalf("unexpected content body %q", got)
+	}
+}
+
+func TestAttachmentContentNonManagedRejected(t *testing.T) {
+	srv := newListTestServer(t)
+	seedListTask(t, srv, "gr-ac02", "content task", 2)
 
 	payload := api.AttachmentCreateLinkRequest{
 		Kind:        string(models.AttachmentKindArtifact),
@@ -165,7 +210,7 @@ func TestAttachmentContentNotImplemented(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-ac01/attachments/link", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-ac02/attachments/link", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
@@ -180,18 +225,135 @@ func TestAttachmentContentNotImplemented(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/v1/attachments/"+created.ID+"/content", nil)
 	w = httptest.NewRecorder()
 	srv.routes().ServeHTTP(w, req)
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d (%s)", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", w.Code, w.Body.String())
 	}
 
 	var errResp api.ErrorResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
-	if errResp.Code != "not_implemented" {
-		t.Fatalf("expected not_implemented code, got %q", errResp.Code)
+	if errResp.ErrorCode != ErrCodeInvalidArgument {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidArgument, errResp.ErrorCode)
 	}
-	if errResp.ErrorCode != ErrCodeNotImplemented {
-		t.Fatalf("expected error_code %d, got %d", ErrCodeNotImplemented, errResp.ErrorCode)
+}
+
+func TestAttachmentBlobGCEndToEnd(t *testing.T) {
+	srv := newListTestServer(t)
+	seedListTask(t, srv, "gr-gc01", "gc task", 2)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("kind", string(models.AttachmentKindArtifact))
+	part, err := writer.CreateFormFile("content", "artifact.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
 	}
+	if _, err := part.Write([]byte("gc me")); err != nil {
+		t.Fatalf("write form content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-gc01/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var created models.Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode attachment: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/attachments/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	dryReq, err := json.Marshal(api.BlobGCRequest{DryRun: true})
+	if err != nil {
+		t.Fatalf("marshal dry-run request: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/admin/gc-blobs", bytes.NewReader(dryReq))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var dryResp api.BlobGCResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &dryResp); err != nil {
+		t.Fatalf("decode dry-run response: %v", err)
+	}
+	if dryResp.CandidateCount < 1 || !dryResp.DryRun {
+		t.Fatalf("unexpected dry-run response: %#v", dryResp)
+	}
+
+	applyReq, err := json.Marshal(api.BlobGCRequest{DryRun: false})
+	if err != nil {
+		t.Fatalf("marshal apply request: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/admin/gc-blobs", bytes.NewReader(applyReq))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Confirm", "true")
+	w = httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var applyResp api.BlobGCResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &applyResp); err != nil {
+		t.Fatalf("decode apply response: %v", err)
+	}
+	if applyResp.DeletedCount < 1 || applyResp.DryRun {
+		t.Fatalf("unexpected apply response: %#v", applyResp)
+	}
+}
+
+func TestHandleCreateTaskAttachment_RequestTooLarge_ReturnsStructured1002(t *testing.T) {
+	srv := newListTestServer(t)
+	seedListTask(t, srv, "gr-lg11", "large upload", 2)
+
+	boundary := "grns-boundary"
+	header := fmt.Sprintf("--%s\r\nContent-Disposition: form-data; name=\"kind\"\r\n\r\nartifact\r\n--%s\r\nContent-Disposition: form-data; name=\"content\"; filename=\"big.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n", boundary, boundary)
+	trailer := fmt.Sprintf("\r\n--%s--\r\n", boundary)
+	payload := io.MultiReader(
+		strings.NewReader(header),
+		io.LimitReader(zeroReader{}, defaultAttachmentUploadMaxBody+1),
+		strings.NewReader(trailer),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/gr-lg11/attachments", payload)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var errResp api.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.ErrorCode != ErrCodeRequestTooLarge {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeRequestTooLarge, errResp.ErrorCode)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }

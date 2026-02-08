@@ -277,6 +277,34 @@ func (c *Client) ListAllLabels(ctx context.Context) ([]string, error) {
 	return resp, err
 }
 
+// CreateTaskGitRef creates one git reference for a task via POST /v1/tasks/{id}/git-refs.
+func (c *Client) CreateTaskGitRef(ctx context.Context, taskID string, req TaskGitRefCreateRequest) (models.TaskGitRef, error) {
+	var resp models.TaskGitRef
+	err := c.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/git-refs", nil, req, &resp)
+	return resp, err
+}
+
+// ListTaskGitRefs lists git references for one task via GET /v1/tasks/{id}/git-refs.
+func (c *Client) ListTaskGitRefs(ctx context.Context, taskID string) ([]models.TaskGitRef, error) {
+	var resp []models.TaskGitRef
+	err := c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID)+"/git-refs", nil, nil, &resp)
+	return resp, err
+}
+
+// GetTaskGitRef fetches one git reference by id via GET /v1/git-refs/{ref_id}.
+func (c *Client) GetTaskGitRef(ctx context.Context, refID string) (models.TaskGitRef, error) {
+	var resp models.TaskGitRef
+	err := c.do(ctx, http.MethodGet, "/v1/git-refs/"+url.PathEscape(refID), nil, nil, &resp)
+	return resp, err
+}
+
+// DeleteTaskGitRef deletes one git reference by id via DELETE /v1/git-refs/{ref_id}.
+func (c *Client) DeleteTaskGitRef(ctx context.Context, refID string) (map[string]any, error) {
+	var resp map[string]any
+	err := c.do(ctx, http.MethodDelete, "/v1/git-refs/"+url.PathEscape(refID), nil, nil, &resp)
+	return resp, err
+}
+
 // CreateTaskAttachment uploads managed attachment content via POST /v1/tasks/{id}/attachments.
 func (c *Client) CreateTaskAttachment(ctx context.Context, taskID string, req AttachmentUploadRequest, content io.Reader) (models.Attachment, error) {
 	var resp models.Attachment
@@ -371,10 +399,65 @@ func (c *Client) GetAttachment(ctx context.Context, attachmentID string) (models
 	return resp, err
 }
 
+// GetAttachmentContent streams managed content via GET /v1/attachments/{attachment_id}/content.
+func (c *Client) GetAttachmentContent(ctx context.Context, attachmentID string, w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("writer is required")
+	}
+	endpoint := c.baseURL + "/v1/attachments/" + url.PathEscape(attachmentID) + "/content"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return decodeError(resp)
+	}
+	_, err = io.Copy(w, resp.Body)
+	return err
+}
+
 // DeleteAttachment deletes an attachment via DELETE /v1/attachments/{attachment_id}.
 func (c *Client) DeleteAttachment(ctx context.Context, attachmentID string) (map[string]any, error) {
 	var resp map[string]any
 	err := c.do(ctx, http.MethodDelete, "/v1/attachments/"+url.PathEscape(attachmentID), nil, nil, &resp)
+	return resp, err
+}
+
+// AdminGCBlobs executes blob garbage collection via POST /v1/admin/gc-blobs.
+// If confirm is true, X-Confirm is sent to execute deletion; otherwise it is a dry-run.
+func (c *Client) AdminGCBlobs(ctx context.Context, req BlobGCRequest, confirm bool) (BlobGCResponse, error) {
+	var resp BlobGCResponse
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return resp, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/admin/gc-blobs", bytes.NewReader(payload))
+	if err != nil {
+		return resp, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if confirm {
+		httpReq.Header.Set("X-Confirm", "true")
+	}
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	err = json.NewDecoder(httpResp.Body).Decode(&resp)
 	return resp, err
 }
 
@@ -484,11 +567,7 @@ func shouldRetryTransport(err error) bool {
 	}
 
 	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-
-	return false
+	return errors.As(err, &netErr)
 }
 
 func retryDelay(attempt int) time.Duration {

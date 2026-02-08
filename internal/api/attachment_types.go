@@ -24,3 +24,18 @@ type AttachmentCreateLinkRequest struct {
 	Meta        map[string]any `json:"meta,omitempty"`
 	ExpiresAt   *time.Time     `json:"expires_at,omitempty"`
 }
+
+// BlobGCRequest requests one blob garbage-collection run.
+type BlobGCRequest struct {
+	DryRun    bool `json:"dry_run"`
+	BatchSize int  `json:"batch_size,omitempty"`
+}
+
+// BlobGCResponse summarizes one blob garbage-collection run.
+type BlobGCResponse struct {
+	CandidateCount int   `json:"candidate_count"`
+	DeletedCount   int   `json:"deleted_count"`
+	FailedCount    int   `json:"failed_count"`
+	ReclaimedBytes int64 `json:"reclaimed_bytes"`
+	DryRun         bool  `json:"dry_run"`
+}

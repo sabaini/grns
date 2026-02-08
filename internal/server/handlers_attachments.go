@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -10,11 +11,6 @@ import (
 
 	"grns/internal/api"
 	"grns/internal/models"
-)
-
-const (
-	attachmentUploadMaxBody   = 100 << 20 // 100 MiB
-	attachmentMultipartMemory = 8 << 20   // 8 MiB
 )
 
 func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Request) {
@@ -28,8 +24,17 @@ func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, int64(attachmentUploadMaxBody))
-	if err := r.ParseMultipartForm(attachmentMultipartMemory); err != nil {
+	maxBody := s.attachmentUploadMaxBody
+	if maxBody <= 0 {
+		maxBody = defaultAttachmentUploadMaxBody
+	}
+	multipartMemory := s.attachmentMultipartMemory
+	if multipartMemory <= 0 {
+		multipartMemory = defaultAttachmentMultipartMemory
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	if err := r.ParseMultipartForm(multipartMemory); err != nil {
 		s.writeErrorReq(w, r, http.StatusBadRequest, classifyMultipartError(err))
 		return
 	}
@@ -67,14 +72,16 @@ func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 	}
 
 	attachment, err := s.attachmentService.CreateManagedAttachmentFromReader(r.Context(), taskID, CreateManagedAttachmentInput{
-		Kind:            kind,
-		Title:           strings.TrimSpace(r.FormValue("title")),
-		Filename:        firstNonEmpty(strings.TrimSpace(r.FormValue("filename")), header.Filename),
-		MediaType:       mediaType,
-		MediaTypeSource: mediaTypeSource,
-		Labels:          labels,
-		Meta:            map[string]any{},
-		ExpiresAt:       expiresAt,
+		Kind:              kind,
+		Title:             strings.TrimSpace(r.FormValue("title")),
+		Filename:          firstNonEmpty(strings.TrimSpace(r.FormValue("filename")), header.Filename),
+		MediaType:         mediaType,
+		MediaTypeSource:   mediaTypeSource,
+		DeclaredMediaType: declaredMediaType,
+		SniffedMediaType:  detectedMediaType,
+		Labels:            labels,
+		Meta:              map[string]any{},
+		ExpiresAt:         expiresAt,
 	}, buffered)
 	if err != nil {
 		s.writeServiceError(w, r, err)
@@ -174,9 +181,21 @@ func (s *Server) handleGetAttachmentContent(w http.ResponseWriter, r *http.Reque
 		s.writeErrorReq(w, r, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.attachmentService.StreamAttachmentContent(r.Context(), attachmentID); err != nil {
-		s.writeServiceError(w, r, notImplemented(err))
+	content, err := s.attachmentService.OpenAttachmentContent(r.Context(), attachmentID)
+	if err != nil {
+		s.writeServiceError(w, r, err)
 		return
+	}
+	defer content.Reader.Close()
+
+	w.Header().Set("Content-Type", content.MediaType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", content.Filename))
+	if content.SizeBytes >= 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", content.SizeBytes))
+	}
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, content.Reader); err != nil {
+		s.log().Warn("stream attachment content", "attachment_id", attachmentID, "error", err)
 	}
 }
 
@@ -201,7 +220,7 @@ func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 
 func requireAttachmentID(r *http.Request) (string, error) {
 	id := strings.TrimSpace(r.PathValue("attachment_id"))
-	if !validateID(id) {
+	if !validateAttachmentID(id) {
 		return "", badRequestCode(fmt.Errorf("invalid attachment_id"), ErrCodeInvalidID)
 	}
 	return id, nil

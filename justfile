@@ -34,7 +34,7 @@ test-integration: build
     bats tests/
 
 test-smoke: build
-    bats tests/cli_validation_errors.bats tests/cli_import_export.bats tests/cli_admin_cleanup.bats
+    bats tests/cli_autospawn.bats tests/cli_create_show.bats tests/cli_admin_cleanup.bats
 
 test-py: build
     uv run python3 -m pytest -q tests_py

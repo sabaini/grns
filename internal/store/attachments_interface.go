@@ -20,6 +20,7 @@ type AttachmentStore interface {
 	ListAttachmentLabels(ctx context.Context, attachmentID string) ([]string, error)
 
 	UpsertBlob(ctx context.Context, blob *models.Blob) (*models.Blob, error)
+	CreateManagedAttachmentWithBlob(ctx context.Context, blob *models.Blob, attachment *models.Attachment) (*models.Blob, error)
 	GetBlob(ctx context.Context, id string) (*models.Blob, error)
 	GetBlobBySHA256(ctx context.Context, sha string) (*models.Blob, error)
 	ListUnreferencedBlobs(ctx context.Context, limit int) ([]models.Blob, error)

@@ -36,6 +36,7 @@ func newAttachCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 		newAttachAddLinkCmd(cfg, jsonOutput),
 		newAttachListCmd(cfg, jsonOutput),
 		newAttachShowCmd(cfg, jsonOutput),
+		newAttachGetCmd(cfg),
 		newAttachRemoveCmd(cfg, jsonOutput),
 	)
 	return cmd
@@ -171,6 +172,46 @@ func newAttachShowCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 			})
 		},
 	}
+}
+
+func newAttachGetCmd(cfg *config.Config) *cobra.Command {
+	var (
+		outPath string
+		force   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "get <attachment-id>",
+		Short: "Download managed attachment content",
+		Args:  requireExactlyArgs(1, "attachment id is required"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(outPath) == "" {
+				return fmt.Errorf("--output is required")
+			}
+			if !force {
+				if _, err := os.Stat(outPath); err == nil {
+					return fmt.Errorf("output file exists (use --force to overwrite)")
+				}
+			}
+
+			return withClient(cfg, func(client *api.Client) error {
+				f, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+
+				if err := client.GetAttachmentContent(cmd.Context(), args[0], f); err != nil {
+					return err
+				}
+				return writePlain("%s\n", outPath)
+			})
+		},
+	}
+
+	cmd.Flags().StringVarP(&outPath, "output", "o", "", "output path")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite output path if it exists")
+	return cmd
 }
 
 func newAttachRemoveCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {

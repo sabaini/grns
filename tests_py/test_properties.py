@@ -315,7 +315,7 @@ def test_import_export_roundtrip(running_server, tmp_path, priority, task_type, 
     assert int(result["created"]) == len(titles)
 
     # Export and verify all fields survive
-    export_proc = run_grns(env, "export", "--json")
+    export_proc = run_grns(env, "export")
     export_lines = [line for line in export_proc.stdout.strip().split("\n") if line]
     exported = {json.loads(line)["id"]: json.loads(line) for line in export_lines}
 

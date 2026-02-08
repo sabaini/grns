@@ -21,6 +21,7 @@ type registeredRoute struct {
 type boundaryCalls struct {
 	service           []string
 	attachmentService []string
+	gitRefService     []string
 	store             []string
 }
 
@@ -51,7 +52,7 @@ func TestMutationRoutesUseServiceBoundary(t *testing.T) {
 		if len(calls.store) > 0 {
 			t.Fatalf("handler %q (%s %s) calls s.store directly: %v", route.handler, route.method, route.path, calls.store)
 		}
-		if len(calls.service) == 0 && len(calls.attachmentService) == 0 {
+		if len(calls.service) == 0 && len(calls.attachmentService) == 0 && len(calls.gitRefService) == 0 {
 			t.Fatalf("handler %q (%s %s) does not call a service boundary", route.handler, route.method, route.path)
 		}
 	}
@@ -168,6 +169,8 @@ func inspectBoundaryCalls(fn *ast.FuncDecl) boundaryCalls {
 			calls.service = append(calls.service, selector.Sel.Name)
 		case "attachmentService":
 			calls.attachmentService = append(calls.attachmentService, selector.Sel.Name)
+		case "gitRefService":
+			calls.gitRefService = append(calls.gitRefService, selector.Sel.Name)
 		case "store":
 			calls.store = append(calls.store, selector.Sel.Name)
 		}
@@ -175,6 +178,7 @@ func inspectBoundaryCalls(fn *ast.FuncDecl) boundaryCalls {
 	})
 	calls.service = uniqueSorted(calls.service)
 	calls.attachmentService = uniqueSorted(calls.attachmentService)
+	calls.gitRefService = uniqueSorted(calls.gitRefService)
 	calls.store = uniqueSorted(calls.store)
 	return calls
 }
@@ -190,6 +194,7 @@ func isMutationMethod(method string) bool {
 
 func isTaskMutationPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/tasks") ||
+		strings.HasPrefix(path, "/v1/git-refs") ||
 		strings.HasPrefix(path, "/v1/deps") ||
 		strings.HasPrefix(path, "/v1/import")
 }

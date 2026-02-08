@@ -22,10 +22,6 @@ const (
 	importStreamMaxLine   = 10 << 20 // 10 MiB
 )
 
-func (s *Server) writeError(w http.ResponseWriter, status int, err error) {
-	s.writeErrorReq(w, nil, status, err)
-}
-
 func (s *Server) writeErrorReq(w http.ResponseWriter, r *http.Request, status int, err error) {
 	if err == nil {
 		err = errors.New(http.StatusText(status))
@@ -102,16 +98,8 @@ func badRequestCode(err error, code int) error {
 	return makeAPIError(http.StatusBadRequest, "invalid_argument", code, err)
 }
 
-func notFound(err error) error {
-	return notFoundCode(err, ErrCodeTaskNotFound)
-}
-
 func notFoundCode(err error, code int) error {
 	return makeAPIError(http.StatusNotFound, "not_found", code, err)
-}
-
-func conflict(err error) error {
-	return conflictCode(err, ErrCodeConflict)
 }
 
 func conflictCode(err error, code int) error {
@@ -120,10 +108,6 @@ func conflictCode(err error, code int) error {
 
 func internalError(err error) error {
 	return makeAPIError(http.StatusInternalServerError, "internal", ErrCodeInternal, err)
-}
-
-func notImplemented(err error) error {
-	return makeAPIError(http.StatusNotImplemented, "not_implemented", ErrCodeNotImplemented, err)
 }
 
 func storeFailure(err error) error {
@@ -186,7 +170,7 @@ func isUniqueConstraint(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.id")
+	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
 }
 
 func isInvalidSearchQuery(err error) bool {
@@ -253,14 +237,6 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 
 func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	s.writeErrorReq(w, r, http.StatusInternalServerError, storeFailure(err))
-}
-
-func (s *Server) withLimiter(w http.ResponseWriter, r *http.Request, limiter chan struct{}, name string, fn func()) {
-	if !s.acquireLimiter(limiter, w, r, name) {
-		return
-	}
-	defer s.releaseLimiter(limiter)
-	fn()
 }
 
 func (s *Server) pathIDOrBadRequest(w http.ResponseWriter, r *http.Request) (string, bool) {

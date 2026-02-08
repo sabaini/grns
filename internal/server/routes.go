@@ -44,6 +44,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/attachments/{attachment_id}/content", s.handleGetAttachmentContent)
 	mux.HandleFunc("DELETE /v1/attachments/{attachment_id}", s.handleDeleteAttachment)
 
+	// Task git references.
+	mux.HandleFunc("POST /v1/tasks/{id}/git-refs", s.handleCreateTaskGitRef)
+	mux.HandleFunc("GET /v1/tasks/{id}/git-refs", s.handleListTaskGitRefs)
+	mux.HandleFunc("GET /v1/git-refs/{ref_id}", s.handleGetTaskGitRef)
+	mux.HandleFunc("DELETE /v1/git-refs/{ref_id}", s.handleDeleteTaskGitRef)
+
 	// Dependency tree.
 	mux.HandleFunc("GET /v1/tasks/{id}/deps/tree", s.handleDepTree)
 
@@ -54,6 +60,7 @@ func (s *Server) routes() http.Handler {
 
 	// Admin.
 	mux.HandleFunc("POST /v1/admin/cleanup", s.handleAdminCleanup)
+	mux.HandleFunc("POST /v1/admin/gc-blobs", s.handleAdminGCBlobs)
 
 	// Dependencies and labels.
 	mux.HandleFunc("POST /v1/deps", s.handleDeps)

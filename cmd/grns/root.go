@@ -47,6 +47,7 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 		newDepCmd(cfg, &jsonOutput),
 		newLabelCmd(cfg, &jsonOutput),
 		newAttachCmd(cfg, &jsonOutput),
+		newGitCmd(cfg, &jsonOutput),
 		newMigrateCmd(cfg, &jsonOutput),
 		newInfoCmd(cfg, &jsonOutput),
 		newAdminCmd(cfg, &jsonOutput),

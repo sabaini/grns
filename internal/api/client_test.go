@@ -1,12 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -186,9 +190,20 @@ func TestClientAttachmentMethods(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/attachments/at-a111":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a111","task_id":"gr-aa11","kind":"artifact","source_type":"external_url","external_url":"https://example.com/a"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/attachments/at-a111/content":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("hello"))
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/attachments/at-a111":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"at-a111"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/gc-blobs":
+			if r.Header.Get("X-Confirm") != "true" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"missing confirm"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidate_count":1,"deleted_count":1,"failed_count":0,"reclaimed_bytes":5,"dry_run":false}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"not found"}`))
@@ -230,6 +245,22 @@ func TestClientAttachmentMethods(t *testing.T) {
 		t.Fatalf("unexpected attachment: %#v", got)
 	}
 
+	content := &bytes.Buffer{}
+	if err := client.GetAttachmentContent(context.Background(), "at-a111", content); err != nil {
+		t.Fatalf("GetAttachmentContent: %v", err)
+	}
+	if content.String() != "hello" {
+		t.Fatalf("unexpected attachment content %q", content.String())
+	}
+
+	gcResp, err := client.AdminGCBlobs(context.Background(), BlobGCRequest{DryRun: false, BatchSize: 50}, true)
+	if err != nil {
+		t.Fatalf("AdminGCBlobs: %v", err)
+	}
+	if gcResp.DeletedCount != 1 || gcResp.ReclaimedBytes != 5 {
+		t.Fatalf("unexpected gc response: %#v", gcResp)
+	}
+
 	deleted, err := client.DeleteAttachment(context.Background(), "at-a111")
 	if err != nil {
 		t.Fatalf("DeleteAttachment: %v", err)
@@ -237,4 +268,68 @@ func TestClientAttachmentMethods(t *testing.T) {
 	if deleted["id"] != "at-a111" {
 		t.Fatalf("unexpected delete response: %#v", deleted)
 	}
+}
+
+func TestClientRetryPolicy_TransportErrors(t *testing.T) {
+	origBase := retryBaseDelay
+	origMax := retryMaxDelay
+	retryBaseDelay = time.Millisecond
+	retryMaxDelay = time.Millisecond
+	t.Cleanup(func() {
+		retryBaseDelay = origBase
+		retryMaxDelay = origMax
+	})
+
+	t.Run("retries idempotent get on transport failure", func(t *testing.T) {
+		var attempts int32
+		client := NewClient("http://example.invalid")
+		client.http = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", r.Method)
+			}
+			try := atomic.AddInt32(&attempts, 1)
+			if try <= 2 {
+				return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"project_prefix":"gr","schema_version":6,"task_counts":{},"total_tasks":0}`)),
+			}, nil
+		})}
+
+		_, err := client.GetInfo(context.Background())
+		if err != nil {
+			t.Fatalf("GetInfo after transport retries: %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected 3 attempts (2 retries), got %d", got)
+		}
+	})
+
+	t.Run("does not retry non idempotent post on transport failure", func(t *testing.T) {
+		var attempts int32
+		client := NewClient("http://example.invalid")
+		client.http = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodPost {
+				t.Fatalf("expected POST request, got %s", r.Method)
+			}
+			atomic.AddInt32(&attempts, 1)
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		})}
+
+		_, err := client.CreateTask(context.Background(), TaskCreateRequest{Title: "x"})
+		if err == nil {
+			t.Fatal("expected CreateTask transport error")
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected one POST attempt, got %d", got)
+		}
+	})
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

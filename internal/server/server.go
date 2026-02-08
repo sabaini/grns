@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"grns/internal/blobstore"
 	"grns/internal/store"
 )
 
@@ -17,6 +19,7 @@ const (
 	apiTokenEnvKey         = "GRNS_API_TOKEN"
 	adminTokenEnvKey       = "GRNS_ADMIN_TOKEN"
 	allowRemoteEnvKey      = "GRNS_ALLOW_REMOTE"
+	defaultBlobRootDir     = ".grns/blobs"
 	readHeaderTimeout      = 5 * time.Second
 	readTimeout            = 30 * time.Second
 	writeTimeout           = 60 * time.Second
@@ -24,46 +27,101 @@ const (
 	importConcurrencyLimit = 1
 	exportConcurrencyLimit = 2
 	searchConcurrencyLimit = 4
+
+	defaultAttachmentUploadMaxBody   int64 = 100 << 20 // 100 MiB
+	defaultAttachmentMultipartMemory int64 = 8 << 20   // 8 MiB
 )
 
 // Server wraps HTTP handlers for the grns API.
 type Server struct {
-	addr              string
-	store             store.TaskStore
-	projectPrefix     string
-	service           *TaskService
-	attachmentService *AttachmentService
-	logger            *slog.Logger
-	apiToken          string
-	adminToken        string
-	importLimiter     chan struct{}
-	exportLimiter     chan struct{}
-	searchLimiter     chan struct{}
+	addr                      string
+	store                     store.TaskStore
+	projectPrefix             string
+	service                   *TaskService
+	attachmentService         *AttachmentService
+	gitRefService             *TaskGitRefService
+	blobStore                 blobstore.BlobStore
+	logger                    *slog.Logger
+	apiToken                  string
+	adminToken                string
+	importLimiter             chan struct{}
+	exportLimiter             chan struct{}
+	searchLimiter             chan struct{}
+	attachmentUploadMaxBody   int64
+	attachmentMultipartMemory int64
+}
+
+// AttachmentOptions configures attachment runtime behavior on the server.
+type AttachmentOptions struct {
+	MaxUploadBytes          int64
+	MultipartMaxMemory      int64
+	AllowedMediaTypes       []string
+	RejectMediaTypeMismatch bool
+	GCBatchSize             int
 }
 
 // New creates a new server instance.
-func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *slog.Logger) *Server {
+func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *slog.Logger, blobStores ...blobstore.BlobStore) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	var attachmentService *AttachmentService
-	if attachmentStore, ok := any(taskStore).(store.AttachmentStore); ok {
-		attachmentService = NewAttachmentService(taskStore, attachmentStore)
+	var bs blobstore.BlobStore
+	if len(blobStores) > 0 {
+		bs = blobStores[0]
+	} else {
+		fallbackRoot := filepath.Join(os.TempDir(), defaultBlobRootDir)
+		cas, err := blobstore.NewLocalCAS(fallbackRoot)
+		if err == nil {
+			bs = cas
+		} else {
+			logger.Warn("failed to initialize fallback blob store", "root", fallbackRoot, "error", err)
+		}
 	}
 
-	return &Server{
-		addr:              addr,
-		store:             taskStore,
-		projectPrefix:     projectPrefix,
-		service:           NewTaskService(taskStore, projectPrefix),
-		attachmentService: attachmentService,
-		logger:            logger,
-		apiToken:          strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
-		adminToken:        strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
-		importLimiter:     make(chan struct{}, importConcurrencyLimit),
-		exportLimiter:     make(chan struct{}, exportConcurrencyLimit),
-		searchLimiter:     make(chan struct{}, searchConcurrencyLimit),
+	var attachmentService *AttachmentService
+	if attachmentStore, ok := any(taskStore).(store.AttachmentStore); ok {
+		attachmentService = NewAttachmentService(taskStore, attachmentStore, bs)
+	}
+
+	var gitRefService *TaskGitRefService
+	if gitRefStore, ok := any(taskStore).(store.GitRefStore); ok {
+		gitRefService = NewTaskGitRefService(taskStore, gitRefStore)
+	}
+
+	srv := &Server{
+		addr:                      addr,
+		store:                     taskStore,
+		projectPrefix:             projectPrefix,
+		service:                   NewTaskService(taskStore, projectPrefix),
+		attachmentService:         attachmentService,
+		gitRefService:             gitRefService,
+		blobStore:                 bs,
+		logger:                    logger,
+		apiToken:                  strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
+		adminToken:                strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
+		importLimiter:             make(chan struct{}, importConcurrencyLimit),
+		exportLimiter:             make(chan struct{}, exportConcurrencyLimit),
+		searchLimiter:             make(chan struct{}, searchConcurrencyLimit),
+		attachmentUploadMaxBody:   defaultAttachmentUploadMaxBody,
+		attachmentMultipartMemory: defaultAttachmentMultipartMemory,
+	}
+	return srv
+}
+
+// ConfigureAttachmentOptions applies attachment settings from config.
+func (s *Server) ConfigureAttachmentOptions(opts AttachmentOptions) {
+	if s == nil {
+		return
+	}
+	if opts.MaxUploadBytes > 0 {
+		s.attachmentUploadMaxBody = opts.MaxUploadBytes
+	}
+	if opts.MultipartMaxMemory > 0 {
+		s.attachmentMultipartMemory = opts.MultipartMaxMemory
+	}
+	if s.attachmentService != nil {
+		s.attachmentService.ConfigurePolicy(opts.AllowedMediaTypes, opts.RejectMediaTypeMismatch, opts.GCBatchSize)
 	}
 }
 

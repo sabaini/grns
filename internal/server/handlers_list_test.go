@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"grns/internal/api"
+	"grns/internal/blobstore"
 	"grns/internal/models"
 	"grns/internal/store"
 )
@@ -119,7 +120,12 @@ func newListTestServer(t *testing.T) *Server {
 		}
 	})
 
-	return New("127.0.0.1:0", st, "gr", nil)
+	bs, err := blobstore.NewLocalCAS(filepath.Join(t.TempDir(), "blobs"))
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+
+	return New("127.0.0.1:0", st, "gr", nil, bs)
 }
 
 func seedListTask(t *testing.T, srv *Server, id, title string, priority int) {

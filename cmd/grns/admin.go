@@ -16,6 +16,7 @@ func newAdminCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	}
 
 	cmd.AddCommand(newAdminCleanupCmd(cfg, jsonOutput))
+	cmd.AddCommand(newAdminGCBlobsCmd(cfg, jsonOutput))
 	return cmd
 }
 
@@ -74,5 +75,44 @@ func newAdminCleanupCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be removed without deleting")
 	cmd.Flags().BoolVar(&force, "force", false, "actually delete tasks (required for non-dry-run)")
 
+	return cmd
+}
+
+func newAdminGCBlobsCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
+	var (
+		dryRun    bool
+		apply     bool
+		batchSize int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "gc-blobs",
+		Short: "Garbage-collect unreferenced managed blobs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !apply && !dryRun {
+				dryRun = true
+			}
+
+			return withClient(cfg, func(client *api.Client) error {
+				req := api.BlobGCRequest{DryRun: !apply, BatchSize: batchSize}
+				resp, err := client.AdminGCBlobs(cmd.Context(), req, apply)
+				if err != nil {
+					return err
+				}
+				if *jsonOutput {
+					return writeJSON(resp)
+				}
+				mode := "dry run"
+				if !resp.DryRun {
+					mode = "applied"
+				}
+				return writePlain("%s: candidates=%d deleted=%d failed=%d reclaimed_bytes=%d\n", mode, resp.CandidateCount, resp.DeletedCount, resp.FailedCount, resp.ReclaimedBytes)
+			})
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be reclaimed without deleting")
+	cmd.Flags().BoolVar(&apply, "apply", false, "delete unreferenced blobs")
+	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "apply-mode batch size (default: server attachment gc batch size)")
 	return cmd
 }

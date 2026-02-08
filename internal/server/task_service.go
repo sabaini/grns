@@ -343,6 +343,76 @@ func (s *TaskService) Close(ctx context.Context, ids []string) error {
 	return err
 }
 
+// CloseWithCommit closes tasks and atomically records closed_by git refs for each task.
+func (s *TaskService) CloseWithCommit(ctx context.Context, ids []string, commit, repo string) (int, error) {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return 0, badRequestCode(fmt.Errorf("ids are required"), ErrCodeMissingRequired)
+	}
+	if strings.TrimSpace(commit) == "" {
+		return 0, badRequestCode(fmt.Errorf("commit is required"), ErrCodeMissingRequired)
+	}
+
+	gitRefStore, ok := any(s.store).(store.GitRefStore)
+	if !ok {
+		return 0, internalError(fmt.Errorf("git refs are not configured"))
+	}
+
+	canonicalRepo := ""
+	var err error
+	if strings.TrimSpace(repo) != "" {
+		canonicalRepo, err = canonicalGitRepoSlug(repo)
+		if err != nil {
+			return 0, closeRepoValidationError(err)
+		}
+	}
+
+	refs := make([]store.CloseTaskGitRefInput, 0, len(ids))
+	for _, id := range ids {
+		task, err := s.store.GetTask(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		if task == nil {
+			return 0, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+		}
+
+		repoSlug := canonicalRepo
+		if repoSlug == "" {
+			repoSlug, err = canonicalGitRepoSlug(task.SourceRepo)
+			if err != nil {
+				return 0, closeRepoValidationError(err)
+			}
+		}
+
+		refs = append(refs, store.CloseTaskGitRefInput{
+			TaskID:      id,
+			RepoSlug:    repoSlug,
+			Relation:    "closed_by",
+			ObjectType:  string(models.GitObjectTypeCommit),
+			ObjectValue: commit,
+		})
+	}
+
+	now := time.Now().UTC()
+	created, err := gitRefStore.CloseTasksWithGitRefs(ctx, ids, now, refs)
+	if errors.Is(err, store.ErrTaskNotFound) {
+		return 0, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return created, nil
+}
+
+func closeRepoValidationError(err error) error {
+	code := ErrCodeInvalidArgument
+	if strings.Contains(err.Error(), "required") {
+		code = ErrCodeMissingRequired
+	}
+	return badRequestCode(err, code)
+}
+
 // Reopen reopens tasks by ids.
 func (s *TaskService) Reopen(ctx context.Context, ids []string) error {
 	now := time.Now().UTC()
