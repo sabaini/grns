@@ -179,8 +179,8 @@ grns label remove <id> [<id>...] <label>
 grns label list <id>
 grns label list-all
 
-grns attach add <task-id> <path> --kind <kind> [--title ...] [--media-type ...] [--label ...]
-grns attach add-link <task-id> --kind <kind> [--url <https://...>|--repo-path <path>] [--media-type ...] [--label ...]
+grns attach add <task-id> <path> --kind <kind> [--title ...] [--media-type ...] [--label ...] [--expires-at <time>]
+grns attach add-link <task-id> --kind <kind> [--url <https://...>|--repo-path <path>] [--media-type ...] [--label ...] [--expires-at <time>]
 grns attach list <task-id>
 grns attach show <attachment-id>
 grns attach get <attachment-id> -o <path> [--force]
@@ -202,6 +202,16 @@ grns config get <key>
 grns config set <key> <value>
 grns srv
 ```
+
+### JSON output behavior notes
+
+- `grns show <id> [<id>...] --json` preserves request order, including duplicate IDs.
+- `grns close ... --json` returns `{ "ids": [...] }`; with `--commit`, it also includes `commit` and `annotated`.
+- `grns reopen ... --json` returns `{ "ids": [...] }`.
+- `grns dep add ... --json` returns `{ "child_id": ..., "parent_id": ..., "type": ... }`.
+- `grns label add/remove ... --json` returns the updated label array.
+- `grns attach rm ... --json` and `grns git rm ... --json` return `{ "id": ... }`.
+- `grns attach add/add-link --expires-at` accepts `RFC3339` or `YYYY-MM-DD`.
 
 ### `create` flags
 

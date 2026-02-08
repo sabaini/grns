@@ -59,3 +59,40 @@ func TestCreateTask_UnknownJSONFieldsAreIgnored(t *testing.T) {
 		t.Fatalf("expected shown id %q, got %q", created.ID, shown.ID)
 	}
 }
+
+func TestCreateTask_TrailingJSONRejected(t *testing.T) {
+	srv := newListTestServer(t)
+
+	payload := []byte(`{"title":"first"}{"title":"second"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var errResp api.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.ErrorCode != ErrCodeInvalidJSON {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidJSON, errResp.ErrorCode)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/tasks", nil)
+	listW := httptest.NewRecorder()
+	srv.routes().ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list status: %d (%s)", listW.Code, listW.Body.String())
+	}
+
+	var tasks []api.TaskResponse
+	if err := json.Unmarshal(listW.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks to be created, got %d", len(tasks))
+	}
+}

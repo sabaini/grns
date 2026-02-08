@@ -118,10 +118,10 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - `POST /tasks` – create a task (supports optional `id`, `parent`, `deps`, `labels`, `custom`).
 - `POST /tasks/batch` – batch create (used by `create -f` for markdown imports), applied transactionally (all-or-nothing).
 - `GET /tasks/{id}` – show task.
-- `POST /tasks/get` – bulk show by IDs (returns full task payloads, used by multi-id `show`).
+- `POST /tasks/get` – bulk show by IDs (returns full task payloads, preserving request order including duplicates; used by multi-id `show`).
 - `PATCH /tasks/{id}` – update fields (partial).
-- `POST /tasks/close` – close one or more tasks (`ids[]`, `reason`).
-- `POST /tasks/reopen` – reopen tasks (`ids[]`, `reason`).
+- `POST /tasks/close` – close one or more tasks (`ids[]`; optional `commit`/`repo` annotation).
+- `POST /tasks/reopen` – reopen tasks (`ids[]`).
 - `GET /tasks` – list/filter (all CLI filters, regex for `spec`, pagination via `limit`/`offset`).
 - `GET /tasks/ready` – ready queue (no open blockers).
 - `GET /tasks/stale` – stale query (`days`, optional `status`, `limit`).

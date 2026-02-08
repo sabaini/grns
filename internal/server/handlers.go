@@ -173,6 +173,13 @@ func isUniqueConstraint(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
 }
 
+func isForeignKeyConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "foreign key constraint failed")
+}
+
 func isInvalidSearchQuery(err error) bool {
 	if err == nil {
 		return false
@@ -193,7 +200,20 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
-	return json.NewDecoder(r.Body).Decode(dst)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+
+	return fmt.Errorf("invalid JSON payload")
 }
 
 func classifyDecodeJSONError(err error) error {

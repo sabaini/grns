@@ -77,6 +77,9 @@ func (s *Store) CreateTasks(ctx context.Context, tasks []TaskCreateInput) (err e
 		if err = insertTaskRow(ctx, tx, create.Task); err != nil {
 			return err
 		}
+	}
+
+	for _, create := range tasks {
 		if err = insertLabels(ctx, tx, create.Task.ID, create.Labels); err != nil {
 			return err
 		}

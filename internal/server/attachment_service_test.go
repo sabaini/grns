@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,6 +160,124 @@ func TestCreateLinkAttachment_RejectsInvalidSourceCombinations(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateManagedAttachmentFromReader_RejectsExpiredAttachment(t *testing.T) {
+	svc, st := newAttachmentServiceForTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	task := &models.Task{ID: "gr-ex11", Title: "Expiry target", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	expiresAt := now.Add(-time.Hour)
+	_, err := svc.CreateManagedAttachmentFromReader(ctx, task.ID, CreateManagedAttachmentInput{
+		Kind:      string(models.AttachmentKindArtifact),
+		ExpiresAt: &expiresAt,
+	}, strings.NewReader("payload"))
+	if err == nil {
+		t.Fatal("expected expires_at validation error")
+	}
+	if httpStatusFromError(err) != 400 {
+		t.Fatalf("expected HTTP 400, got %d (%v)", httpStatusFromError(err), err)
+	}
+	var apiErr apiError
+	if !asAPIError(err, &apiErr) {
+		t.Fatalf("expected apiError, got %T", err)
+	}
+	if apiErr.errCode != ErrCodeInvalidArgument {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidArgument, apiErr.errCode)
+	}
+}
+
+func TestCreateLinkAttachment_RejectsExpiredAttachment(t *testing.T) {
+	svc, st := newAttachmentServiceForTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	task := &models.Task{ID: "gr-ex22", Title: "Expiry target", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateTask(ctx, task, nil, nil); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	expiresAt := now.Add(-time.Hour)
+	_, err := svc.CreateLinkAttachment(ctx, task.ID, CreateLinkAttachmentInput{
+		Kind:        string(models.AttachmentKindArtifact),
+		ExternalURL: "https://example.com/a",
+		ExpiresAt:   &expiresAt,
+	})
+	if err == nil {
+		t.Fatal("expected expires_at validation error")
+	}
+	if httpStatusFromError(err) != 400 {
+		t.Fatalf("expected HTTP 400, got %d (%v)", httpStatusFromError(err), err)
+	}
+	var apiErr apiError
+	if !asAPIError(err, &apiErr) {
+		t.Fatalf("expected apiError, got %T", err)
+	}
+	if apiErr.errCode != ErrCodeInvalidArgument {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidArgument, apiErr.errCode)
+	}
+}
+
+func TestAttachmentServiceGCBlobs_TerminatesWhenDeletesFail(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "attachment_service_gc_test.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	now := time.Now().UTC()
+	if _, err := st.UpsertBlob(context.Background(), &models.Blob{
+		ID:             "bl-gc11",
+		SHA256:         strings.Repeat("b", 64),
+		SizeBytes:      3,
+		StorageBackend: "local_cas",
+		BlobKey:        "sha256/bb/bb/" + strings.Repeat("b", 64),
+		CreatedAt:      now,
+	}); err != nil {
+		t.Fatalf("upsert blob: %v", err)
+	}
+
+	svc := NewAttachmentService(st, st, failingDeleteBlobStore{})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	result, err := svc.GCBlobs(ctx, 1, true)
+	if err != nil {
+		t.Fatalf("gc blobs: %v", err)
+	}
+	if result.CandidateCount == 0 {
+		t.Fatalf("expected candidates, got %#v", result)
+	}
+	if result.DeletedCount != 0 {
+		t.Fatalf("expected no deletions, got %#v", result)
+	}
+	if result.FailedCount == 0 {
+		t.Fatalf("expected failed deletions, got %#v", result)
+	}
+}
+
+type failingDeleteBlobStore struct{}
+
+func (failingDeleteBlobStore) Put(context.Context, io.Reader) (blobstore.BlobPutResult, error) {
+	return blobstore.BlobPutResult{}, errors.New("not implemented")
+}
+
+func (failingDeleteBlobStore) Open(context.Context, string) (io.ReadCloser, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (failingDeleteBlobStore) Delete(context.Context, string) error {
+	return errors.New("delete failed")
 }
 
 func newAttachmentServiceForTest(t *testing.T) (*AttachmentService, *store.Store) {

@@ -40,9 +40,17 @@ func (s *TaskService) Create(ctx context.Context, req api.TaskCreateRequest) (ap
 		return api.TaskResponse{}, err
 	}
 
+	createdIDs := map[string]bool{prepared.task.ID: true}
+	if err := s.validateDependencyParents(prepared.deps, createdIDs, s.store.TaskExists); err != nil {
+		return api.TaskResponse{}, err
+	}
+
 	if err := s.store.CreateTask(ctx, prepared.task, prepared.labels, prepared.deps); err != nil {
 		if isUniqueConstraint(err) {
 			return api.TaskResponse{}, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
+		}
+		if isForeignKeyConstraint(err) {
+			return api.TaskResponse{}, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 		}
 		return api.TaskResponse{}, err
 	}
@@ -78,8 +86,19 @@ func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequ
 		return found, nil
 	}
 
-	batch := make([]store.TaskCreateInput, 0, len(reqs))
-	responses := make([]api.TaskResponse, 0, len(reqs))
+	existsInStore := func(id string) (bool, error) {
+		if cached, ok := taskExistsCache[id]; ok {
+			return cached, nil
+		}
+		found, err := s.store.TaskExists(id)
+		if err != nil {
+			return false, err
+		}
+		taskExistsCache[id] = found
+		return found, nil
+	}
+
+	preparedBatch := make([]preparedTaskCreate, 0, len(reqs))
 	for _, req := range reqs {
 		prepared, err := s.prepareCreateRequest(prefix, req, exists, time.Now().UTC())
 		if err != nil {
@@ -87,6 +106,15 @@ func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequ
 		}
 		reservedIDs[prepared.task.ID] = true
 		taskExistsCache[prepared.task.ID] = true
+		preparedBatch = append(preparedBatch, prepared)
+	}
+
+	batch := make([]store.TaskCreateInput, 0, len(reqs))
+	responses := make([]api.TaskResponse, 0, len(reqs))
+	for _, prepared := range preparedBatch {
+		if err := s.validateDependencyParents(prepared.deps, reservedIDs, existsInStore); err != nil {
+			return nil, err
+		}
 		batch = append(batch, store.TaskCreateInput{Task: prepared.task, Labels: prepared.labels, Deps: prepared.deps})
 		responses = append(responses, prepared.response)
 	}
@@ -94,6 +122,9 @@ func (s *TaskService) BatchCreate(ctx context.Context, reqs []api.TaskCreateRequ
 	if err := s.store.CreateTasks(ctx, batch); err != nil {
 		if isUniqueConstraint(err) {
 			return nil, conflictCode(fmt.Errorf("id already exists"), ErrCodeTaskIDExists)
+		}
+		if isForeignKeyConstraint(err) {
+			return nil, badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
 		}
 		return nil, err
 	}
@@ -216,6 +247,25 @@ func (s *TaskService) prepareCreateRequest(prefix string, req api.TaskCreateRequ
 	}, nil
 }
 
+func (s *TaskService) validateDependencyParents(deps []models.Dependency, createdIDs map[string]bool, taskExists func(string) (bool, error)) error {
+	for _, dep := range deps {
+		if createdIDs != nil && createdIDs[dep.ParentID] {
+			continue
+		}
+		if taskExists == nil {
+			continue
+		}
+		exists, err := taskExists(dep.ParentID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return badRequestCode(fmt.Errorf("invalid dependency parent_id"), ErrCodeInvalidDependency)
+		}
+	}
+	return nil
+}
+
 // Update updates a task and returns the updated response.
 func (s *TaskService) Update(ctx context.Context, id string, req api.TaskUpdateRequest) (api.TaskResponse, error) {
 	var resp api.TaskResponse
@@ -257,18 +307,18 @@ func (s *TaskService) Get(ctx context.Context, id string) (api.TaskResponse, err
 	return resp, nil
 }
 
-// GetMany returns multiple task responses, preserving request order.
+// GetMany returns multiple task responses, preserving request order (including duplicates).
 func (s *TaskService) GetMany(ctx context.Context, ids []string) ([]api.TaskResponse, error) {
-	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
 		return nil, badRequestCode(fmt.Errorf("ids are required"), ErrCodeMissingRequired)
 	}
 
-	tasks, err := s.store.ListTasks(ctx, taskListFilter{IDs: ids}.toStoreListFilter())
+	uniqueIDs := uniqueStrings(ids)
+	tasks, err := s.store.ListTasks(ctx, taskListFilter{IDs: uniqueIDs}.toStoreListFilter())
 	if err != nil {
 		return nil, err
 	}
-	if len(tasks) != len(ids) {
+	if len(tasks) != len(uniqueIDs) {
 		return nil, notFoundCode(fmt.Errorf("task not found"), ErrCodeTaskNotFound)
 	}
 

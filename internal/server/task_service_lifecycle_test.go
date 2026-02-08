@@ -49,6 +49,15 @@ func TestTaskServiceCreate_ValidationMatrix(t *testing.T) {
 			wantCode:   ErrCodeInvalidLabel,
 		},
 		{
+			name: "missing dependency parent",
+			req: api.TaskCreateRequest{
+				Title: "x",
+				Deps:  []models.Dependency{{ParentID: "gr-zz99", Type: "blocks"}},
+			},
+			wantStatus: 400,
+			wantCode:   ErrCodeInvalidDependency,
+		},
+		{
 			name:       "invalid priority",
 			req:        api.TaskCreateRequest{Title: "x", Priority: intPtrRef(9)},
 			wantStatus: 400,
@@ -101,17 +110,45 @@ func TestTaskServiceGetMany_MixedMissingIDsReturnsNotFound(t *testing.T) {
 		assertAPIErrorStatusAndCode(t, err, 404, ErrCodeTaskNotFound)
 	})
 
-	t.Run("duplicate ids are de-duplicated while preserving first-seen order", func(t *testing.T) {
+	t.Run("duplicate ids preserve full request order", func(t *testing.T) {
 		responses, err := svc.GetMany(ctx, []string{"gr-gm22", "gr-gm22", "gr-gm11"})
 		if err != nil {
 			t.Fatalf("get many with duplicate ids: %v", err)
 		}
+		if len(responses) != 3 {
+			t.Fatalf("expected 3 responses, got %d", len(responses))
+		}
+		if responses[0].ID != "gr-gm22" || responses[1].ID != "gr-gm22" || responses[2].ID != "gr-gm11" {
+			t.Fatalf("expected order [gr-gm22 gr-gm22 gr-gm11], got [%s %s %s]", responses[0].ID, responses[1].ID, responses[2].ID)
+		}
+	})
+}
+
+func TestTaskServiceBatchCreate_DependencyValidation(t *testing.T) {
+	svc, _ := newTaskServiceForTest(t)
+	ctx := context.Background()
+
+	t.Run("allows forward dependency within batch", func(t *testing.T) {
+		responses, err := svc.BatchCreate(ctx, []api.TaskCreateRequest{
+			{ID: "gr-ch11", Title: "child", Deps: []models.Dependency{{ParentID: "gr-pa11", Type: "blocks"}}},
+			{ID: "gr-pa11", Title: "parent"},
+		})
+		if err != nil {
+			t.Fatalf("batch create with forward dependency: %v", err)
+		}
 		if len(responses) != 2 {
-			t.Fatalf("expected 2 responses after de-duplication, got %d", len(responses))
+			t.Fatalf("expected 2 created tasks, got %d", len(responses))
 		}
-		if responses[0].ID != "gr-gm22" || responses[1].ID != "gr-gm11" {
-			t.Fatalf("expected order [gr-gm22 gr-gm11], got [%s %s]", responses[0].ID, responses[1].ID)
+	})
+
+	t.Run("missing dependency parent returns invalid dependency", func(t *testing.T) {
+		_, err := svc.BatchCreate(ctx, []api.TaskCreateRequest{
+			{ID: "gr-mc11", Title: "child", Deps: []models.Dependency{{ParentID: "gr-xx99", Type: "blocks"}}},
+		})
+		if err == nil {
+			t.Fatal("expected invalid dependency error")
 		}
+		assertAPIErrorStatusAndCode(t, err, 400, ErrCodeInvalidDependency)
 	})
 }
 

@@ -151,11 +151,15 @@ func (s *AttachmentService) CreateManagedAttachment(ctx context.Context, taskID 
 		return zero, err
 	}
 
+	now := time.Now().UTC()
+	if err := validateAttachmentExpiry(in.ExpiresAt, now); err != nil {
+		return zero, err
+	}
+
 	id, err := s.nextAttachmentID(ctx)
 	if err != nil {
 		return zero, err
 	}
-	now := time.Now().UTC()
 	attachment := &models.Attachment{
 		ID:              id,
 		TaskID:          taskID,
@@ -221,11 +225,15 @@ func (s *AttachmentService) CreateManagedAttachmentFromReader(ctx context.Contex
 		return zero, err
 	}
 
+	now := time.Now().UTC()
+	if err := validateAttachmentExpiry(in.ExpiresAt, now); err != nil {
+		return zero, err
+	}
+
 	id, err := s.nextAttachmentID(ctx)
 	if err != nil {
 		return zero, err
 	}
-	now := time.Now().UTC()
 	attachment := &models.Attachment{
 		ID:              id,
 		TaskID:          taskID,
@@ -331,11 +339,15 @@ func (s *AttachmentService) CreateLinkAttachment(ctx context.Context, taskID str
 		sourceType = string(models.AttachmentSourceExternalURL)
 	}
 
+	now := time.Now().UTC()
+	if err := validateAttachmentExpiry(in.ExpiresAt, now); err != nil {
+		return zero, err
+	}
+
 	id, err := s.nextAttachmentID(ctx)
 	if err != nil {
 		return zero, err
 	}
-	now := time.Now().UTC()
 	attachment := &models.Attachment{
 		ID:              id,
 		TaskID:          taskID,
@@ -516,6 +528,7 @@ func (s *AttachmentService) GCBlobs(ctx context.Context, batchSize int, apply bo
 		}
 		result.CandidateCount += len(blobs)
 
+		deletedThisRound := 0
 		for _, blob := range blobs {
 			if err := s.blobStore.Delete(ctx, blob.BlobKey); err != nil {
 				result.FailedCount++
@@ -527,6 +540,10 @@ func (s *AttachmentService) GCBlobs(ctx context.Context, batchSize int, apply bo
 			}
 			result.DeletedCount++
 			result.ReclaimedBytes += blob.SizeBytes
+			deletedThisRound++
+		}
+		if deletedThisRound == 0 {
+			return result, nil
 		}
 	}
 }
@@ -636,6 +653,16 @@ func (s *AttachmentService) validateAllowedMediaType(mediaType string) error {
 		return nil
 	}
 	return badRequestCode(fmt.Errorf("media_type is not allowed"), ErrCodeInvalidArgument)
+}
+
+func validateAttachmentExpiry(expiresAt *time.Time, createdAt time.Time) error {
+	if expiresAt == nil || expiresAt.IsZero() {
+		return nil
+	}
+	if expiresAt.UTC().Before(createdAt.UTC()) {
+		return badRequestCode(fmt.Errorf("expires_at must be >= created_at"), ErrCodeInvalidArgument)
+	}
+	return nil
 }
 
 func allowedAttachmentMediaTypes() map[string]struct{} {

@@ -136,6 +136,9 @@ Bulk get tasks by IDs.
 
 **Response:** `200 OK` — array of `TaskResponse`.
 
+Response ordering matches the request `ids` order, including duplicates.
+For example, `{"ids":["gr-ab12","gr-ab12","gr-cd34"]}` returns three entries in that same order.
+
 ### `POST /v1/tasks/batch`
 
 Batch create tasks (transactional, all-or-nothing).
@@ -157,9 +160,24 @@ Close one or more tasks. Optionally annotate with a git commit.
 }
 ```
 
-`commit` and `repo` are optional. When provided, a `closed_by` git ref is created.
+`commit` and `repo` are optional. If `repo` is provided, `commit` is required.
+When `commit` is provided, a `closed_by` git ref is created.
 
-**Response:** `200 OK` — array of closed `TaskResponse`.
+**Response:** `200 OK`.
+
+Without commit annotation:
+```json
+{ "ids": ["gr-ab12"] }
+```
+
+With commit annotation:
+```json
+{
+  "ids": ["gr-ab12"],
+  "commit": "a3f0...40hex",
+  "annotated": 1
+}
+```
 
 ### `POST /v1/tasks/reopen`
 
@@ -170,11 +188,14 @@ Reopen closed tasks.
 { "ids": ["gr-ab12"] }
 ```
 
-**Response:** `200 OK` — array of reopened `TaskResponse`.
+**Response:** `200 OK`.
+```json
+{ "ids": ["gr-ab12"] }
+```
 
 ### `GET /v1/tasks/ready`
 
-Tasks with no open blockers. Query params: `limit`, `offset`.
+Tasks with no open blockers. Query params: `limit`.
 
 **Response:** `200 OK` — array of `TaskResponse`.
 
@@ -231,7 +252,7 @@ Add labels to a task.
 { "labels": ["backend", "urgent"] }
 ```
 
-**Response:** `204 No Content`.
+**Response:** `200 OK` — updated label array.
 
 ### `DELETE /v1/tasks/{id}/labels`
 
@@ -242,7 +263,7 @@ Remove labels from a task.
 { "labels": ["urgent"] }
 ```
 
-**Response:** `204 No Content`.
+**Response:** `200 OK` — updated label array.
 
 ### `GET /v1/labels`
 
@@ -269,7 +290,14 @@ Add a dependency between tasks.
 
 `type` defaults to `blocks` if omitted.
 
-**Response:** `201 Created`.
+**Response:** `200 OK`.
+```json
+{
+  "child_id": "gr-ab12",
+  "parent_id": "gr-cd34",
+  "type": "blocks"
+}
+```
 
 ### `GET /v1/tasks/{id}/deps/tree`
 
@@ -302,11 +330,13 @@ Get the full dependency tree for a task. Max depth: 50.
 Upload a managed file attachment. Content-Type: `multipart/form-data`.
 
 **Form fields:**
-- `file` — the file to upload (required)
+- `content` — the file bytes to upload (required)
 - `kind` — attachment kind: `spec`, `diagram`, `artifact`, `diagnostic`, `archive`, `other` (required)
 - `title` — display title (optional)
+- `filename` — override filename (optional)
 - `media_type` — declared MIME type (optional; validated against sniffed type)
-- `labels` — comma-separated labels (optional)
+- `label`, `labels`, or `labels[]` — labels (optional; comma-separated and/or repeated)
+- `expires_at` — RFC3339 or `YYYY-MM-DD` (optional)
 
 **Response:** `201 Created` — `Attachment`.
 
@@ -353,7 +383,10 @@ Download attachment content (managed blobs only).
 
 Delete an attachment (metadata only; blob bytes reclaimed by GC).
 
-**Response:** `204 No Content`.
+**Response:** `200 OK`.
+```json
+{ "id": "at-ab12" }
+```
 
 ### Attachment Schema
 
@@ -422,7 +455,10 @@ Get a single git reference.
 
 Delete a git reference.
 
-**Response:** `204 No Content`.
+**Response:** `200 OK`.
+```json
+{ "id": "gf-ab12" }
+```
 
 ### TaskGitRef Schema
 

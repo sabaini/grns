@@ -126,3 +126,89 @@ func TestHandleGetTasks(t *testing.T) {
 		t.Fatalf("expected request order preserved, got %+v", tasks)
 	}
 }
+
+func TestHandleGetTasks_PreservesDuplicateIDs(t *testing.T) {
+	srv := newListTestServer(t)
+	now := time.Now().UTC()
+	if err := srv.store.CreateTask(context.Background(), &models.Task{ID: "gr-dp11", Title: "dup", Status: "open", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now}, nil, nil); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	payload := api.TaskGetManyRequest{IDs: []string{"gr-dp11", "gr-dp11"}}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/get", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	var tasks []api.TaskResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(tasks))
+	}
+	if tasks[0].ID != "gr-dp11" || tasks[1].ID != "gr-dp11" {
+		t.Fatalf("expected duplicated ids in response, got %+v", tasks)
+	}
+}
+
+func TestHandleBatchCreate_ForwardDependencyInBatch(t *testing.T) {
+	srv := newListTestServer(t)
+
+	payload := []api.TaskCreateRequest{
+		{ID: "gr-fc11", Title: "child", Deps: []models.Dependency{{ParentID: "gr-fp11", Type: "blocks"}}},
+		{ID: "gr-fp11", Title: "parent"},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleCreateTask_MissingDependencyParentReturns400(t *testing.T) {
+	srv := newListTestServer(t)
+
+	payload := api.TaskCreateRequest{
+		ID:    "gr-md11",
+		Title: "child",
+		Deps:  []models.Dependency{{ParentID: "gr-ab12", Type: "blocks"}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.routes().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", w.Code, w.Body.String())
+	}
+	var errResp api.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.ErrorCode != ErrCodeInvalidDependency {
+		t.Fatalf("expected error_code %d, got %d", ErrCodeInvalidDependency, errResp.ErrorCode)
+	}
+}
