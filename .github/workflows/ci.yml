@@ -123,6 +123,46 @@ jobs:
           path: /tmp/grns-stress-summary.json
           if-no-files-found: ignore
 
+  snap-lxc:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Install and initialize LXD
+        run: |
+          if ! snap list lxd >/dev/null 2>&1; then
+            sudo snap install lxd
+          fi
+          sudo lxd waitready
+          sudo lxd init --auto
+
+      - name: Route lxc through sudo in test shell
+        run: |
+          mkdir -p .github/tools
+          cat > .github/tools/lxc <<'EOF'
+          #!/usr/bin/env bash
+          exec sudo lxc "$@"
+          EOF
+          chmod +x .github/tools/lxc
+          echo "$PWD/.github/tools" >> "$GITHUB_PATH"
+
+      - name: Build snap
+        id: snapbuild
+        uses: snapcore/action-build@v1
+
+      - name: Snap daemon integration test in LXC
+        env:
+          GRNS_RUN_SNAP_LXC_TEST: "1"
+          GRNS_SNAP_FILE: ${{ steps.snapbuild.outputs.snap }}
+        run: bats tests/cli_snap_lxc.bats
+
   perf-go:
     needs: test
     runs-on: ubuntu-latest

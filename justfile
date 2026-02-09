@@ -36,6 +36,11 @@ fmt-check:
 test-integration: build
     bats tests/
 
+test-snap-lxc:
+    snap_file="$$(find . -maxdepth 1 -type f -name 'grns_*.snap' | head -n 1)"; \
+    test -n "$$snap_file" || (echo "no grns_*.snap file found; run 'just snap' first" >&2; exit 1); \
+    GRNS_RUN_SNAP_LXC_TEST=1 GRNS_SNAP_FILE="$$snap_file" bats tests/cli_snap_lxc.bats
+
 test-smoke: build
     bats tests/cli_autospawn.bats tests/cli_create_show.bats tests/cli_admin_cleanup.bats
 

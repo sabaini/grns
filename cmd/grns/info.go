@@ -20,6 +20,11 @@ func newInfoCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 					return err
 				}
 
+				dbPath := resp.DBPath
+				if dbPath == "" {
+					dbPath = cfg.DBPath
+				}
+
 				output := struct {
 					DBPath        string         `json:"db_path"`
 					ProjectPrefix string         `json:"project_prefix"`
@@ -27,7 +32,7 @@ func newInfoCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 					TaskCounts    map[string]int `json:"task_counts"`
 					TotalTasks    int            `json:"total_tasks"`
 				}{
-					DBPath:        cfg.DBPath,
+					DBPath:        dbPath,
 					ProjectPrefix: resp.ProjectPrefix,
 					SchemaVersion: resp.SchemaVersion,
 					TaskCounts:    resp.TaskCounts,

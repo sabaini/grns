@@ -46,6 +46,7 @@ func newSrvCmd(cfg *config.Config) *cobra.Command {
 			}
 
 			srv := server.New(addr, st, cfg.ProjectPrefix, logger, bs)
+			srv.SetDBPath(cfg.DBPath)
 			srv.ConfigureAttachmentOptions(server.AttachmentOptions{
 				MaxUploadBytes:          cfg.Attachments.MaxUploadBytes,
 				MultipartMaxMemory:      cfg.Attachments.MultipartMaxMemory,

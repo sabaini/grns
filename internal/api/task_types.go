@@ -41,6 +41,7 @@ type TaskUpdateRequest struct {
 
 // InfoResponse is the response from GET /v1/info.
 type InfoResponse struct {
+	DBPath        string         `json:"db_path,omitempty"`
 	ProjectPrefix string         `json:"project_prefix"`
 	SchemaVersion int            `json:"schema_version"`
 	TaskCounts    map[string]int `json:"task_counts"`

@@ -18,6 +18,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.InfoResponse{
+		DBPath:        s.dbPath,
 		ProjectPrefix: s.projectPrefix,
 		SchemaVersion: info.SchemaVersion,
 		TaskCounts:    info.TaskCounts,

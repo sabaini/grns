@@ -49,6 +49,7 @@ type Server struct {
 	searchLimiter             chan struct{}
 	attachmentUploadMaxBody   int64
 	attachmentMultipartMemory int64
+	dbPath                    string
 }
 
 // AttachmentOptions configures attachment runtime behavior on the server.
@@ -123,6 +124,14 @@ func (s *Server) ConfigureAttachmentOptions(opts AttachmentOptions) {
 	if s.attachmentService != nil {
 		s.attachmentService.ConfigurePolicy(opts.AllowedMediaTypes, opts.RejectMediaTypeMismatch, opts.GCBatchSize)
 	}
+}
+
+// SetDBPath records the active database path for runtime metadata endpoints.
+func (s *Server) SetDBPath(path string) {
+	if s == nil {
+		return
+	}
+	s.dbPath = strings.TrimSpace(path)
 }
 
 // ListenAndServe starts the HTTP server.

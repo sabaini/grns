@@ -14,6 +14,12 @@ bats tests
 # Performance/stress suite
 bats tests/perf
 
+# Snap-in-LXC integration test (optional; auto-discovers grns_*.snap in repo root)
+GRNS_RUN_SNAP_LXC_TEST=1 bats tests/cli_snap_lxc.bats
+
+# or pass an explicit snap file
+GRNS_RUN_SNAP_LXC_TEST=1 GRNS_SNAP_FILE="$(ls -1 grns_*.snap | head -n 1)" bats tests/cli_snap_lxc.bats
+
 # Integration/concurrency pytest suite (optional)
 python3 -m pytest -q tests_py
 
@@ -47,6 +53,11 @@ Pytest mixed stress knobs:
 - `GRNS_STRESS_MAX_ERROR_RATE` (default: 0.0)
 - `GRNS_STRESS_MAX_P95_MS` (default: disabled)
 - `GRNS_STRESS_SUMMARY_PATH` (optional: write JSON summary artifact to this path)
+
+Snap-in-LXC knobs:
+- `GRNS_RUN_SNAP_LXC_TEST=1` (required; test is skipped by default)
+- `GRNS_SNAP_FILE` (path to `grns_*.snap`; when unset, test auto-discovers one in repo root)
+- `GRNS_LXC_IMAGE` (default: `ubuntu:24.04`)
 
 The stress test emits a single-line `STRESS_SUMMARY ...` JSON log at the end of each run.
 

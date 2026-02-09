@@ -94,3 +94,21 @@ sudo snap connect grns:removable-media
 
 - The CLI app sets `GRNS_CONFIG_DIR=$SNAP_USER_COMMON` so user config is snap-scoped.
 - If `grns.daemon` is running, the CLI connects to it and does not auto-spawn another server.
+- `grns info` reports the database path of the connected server process (for the daemon this is typically `/var/snap/grns/common/grns.db`).
+
+## Optional LXC integration test
+
+A BATS test verifies snap daemon behavior inside an LXC container:
+
+```bash
+GRNS_RUN_SNAP_LXC_TEST=1 bats tests/cli_snap_lxc.bats
+# or pass an explicit snap file:
+GRNS_RUN_SNAP_LXC_TEST=1 GRNS_SNAP_FILE="$(ls -1 grns_*.snap | head -n 1)" bats tests/cli_snap_lxc.bats
+# or via just
+just test-snap-lxc
+```
+
+Notes:
+- Requires `lxc` and a working LXD setup on the host.
+- Uses image `ubuntu:24.04` by default (override with `GRNS_LXC_IMAGE`).
+- Skipped by default in the regular integration suite.
