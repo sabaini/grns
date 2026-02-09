@@ -27,6 +27,8 @@ const (
 
 	attachmentAllowedMediaTypesEnvKey = "GRNS_ATTACH_ALLOWED_MEDIA_TYPES"
 	attachmentRejectMismatchEnvKey    = "GRNS_ATTACH_REJECT_MEDIA_TYPE_MISMATCH"
+
+	snapCommonConfigRelativePath = "snap/grns/common/.grns.toml"
 )
 
 // AttachmentConfig defines runtime configuration for attachment handling.
@@ -64,20 +66,25 @@ func Default() Config {
 }
 
 func loadFile(path string, cfg *Config) error {
+	_, err := loadFileIfExists(path, cfg)
+	return err
+}
+
+func loadFileIfExists(path string, cfg *Config) (bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	if info.IsDir() {
-		return nil
+		return false, nil
 	}
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return fmt.Errorf("failed to parse config %s: %w", path, err)
+		return false, fmt.Errorf("failed to parse config %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }
 
 func overrideConfigPath() (string, bool) {
@@ -159,7 +166,22 @@ func GlobalPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".grns.toml"), nil
+
+	homePath := filepath.Join(home, ".grns.toml")
+	if info, statErr := os.Stat(homePath); statErr == nil && !info.IsDir() {
+		return homePath, nil
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+
+	snapPath := filepath.Join(home, snapCommonConfigRelativePath)
+	if info, statErr := os.Stat(snapPath); statErr == nil && !info.IsDir() {
+		return snapPath, nil
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+
+	return homePath, nil
 }
 
 // ProjectPath returns the path to the project config file.
@@ -218,9 +240,16 @@ func Load() (*Config, error) {
 		}
 	} else {
 		if home, err := os.UserHomeDir(); err == nil {
-			globalPath := filepath.Join(home, ".grns.toml")
-			if err := loadFile(globalPath, &cfg); err != nil {
-				return nil, err
+			homePath := filepath.Join(home, ".grns.toml")
+			homeLoaded, loadErr := loadFileIfExists(homePath, &cfg)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if !homeLoaded {
+				snapPath := filepath.Join(home, snapCommonConfigRelativePath)
+				if err := loadFile(snapPath, &cfg); err != nil {
+					return nil, err
+				}
 			}
 		}
 

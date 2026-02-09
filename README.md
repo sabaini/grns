@@ -103,7 +103,7 @@ The server persists between CLI invocations. To force a clean state (e.g. before
 ## Configuration
 
 Config files (TOML):
-- Global: `$HOME/.grns.toml`
+- Global: `$HOME/.grns.toml` (fallback: `~/snap/grns/common/.grns.toml` when `$HOME/.grns.toml` is missing)
 - Project: `.grns.toml` in current workspace (**loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`**)
 
 Supported config keys:
@@ -371,6 +371,25 @@ grns --help
 grns <command> --help
 ```
 
+## Snap packaging (Ubuntu)
+
+Build a local snap:
+
+```bash
+snapcraft
+```
+
+Install locally:
+
+```bash
+sudo snap install --dangerous ./grns_*.snap
+```
+
+- CLI command: `grns`
+- Optional service (disabled by default): `grns.daemon`
+
+See `docs/snap.md` for daemon setup and runtime details.
+
 ## Troubleshooting
 
 **"Connection refused" or CLI hangs:**
@@ -403,5 +422,6 @@ grns <command> --help
 | [Git References Design](docs/git-refs.md) | Task-to-git linking model |
 | [Error Codes Design](docs/errcode-design.md) | Numeric error code catalog |
 | [Security](docs/security.md) | Auth, config trust, hardening |
+| [Snap Packaging](docs/snap.md) | Build/install snap and optional daemon service |
 | [Messaging Design](docs/messaging.md) | Future multi-agent broker design (not implemented) |
 | [Performance](docs/performance-go.md) | Benchmarks and regression budgets |

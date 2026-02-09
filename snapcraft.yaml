@@ -1,0 +1,47 @@
+name: grns
+base: core24
+version: git
+summary: Lightweight CLI task tracker for agents
+description: |
+  Grns is a lightweight CLI task tracker for agents.
+
+  This snap ships:
+  - grns: the CLI command
+  - grns.daemon: an optional always-on API service (`grns srv`)
+grade: devel
+confinement: strict
+
+apps:
+  grns:
+    command: bin/grns
+    plugs:
+      - home
+      - network
+      - network-bind
+      - removable-media
+    environment:
+      GRNS_CONFIG_DIR: $SNAP_USER_COMMON
+
+  daemon:
+    command: bin/grns srv
+    daemon: simple
+    install-mode: disable
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+    environment:
+      GRNS_API_URL: http://127.0.0.1:7333
+      GRNS_DB: $SNAP_COMMON/grns.db
+      GRNS_CONFIG_DIR: $SNAP_COMMON
+
+parts:
+  grns:
+    plugin: nil
+    source: .
+    build-snaps:
+      - go/1.24/stable
+    override-build: |
+      set -eux
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+      go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "$CRAFT_PART_INSTALL/bin/grns" ./cmd/grns

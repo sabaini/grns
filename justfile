@@ -5,6 +5,9 @@ bin     := "bin/grns"
 build:
     go build -ldflags "{{ldflags}}" -o {{bin}} ./cmd/grns
 
+snap:
+    snapcraft pack -v
+
 test:
     go test ./...
 

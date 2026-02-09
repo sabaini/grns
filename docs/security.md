@@ -19,13 +19,16 @@ If `GRNS_ADMIN_TOKEN` is set in the server process:
 - admin routes (`/v1/admin/*`) also require:
   - `X-Admin-Token: <token>`
 
-The client automatically sends this header for admin cleanup requests when `GRNS_ADMIN_TOKEN` is set.
+If both `GRNS_API_TOKEN` and `GRNS_ADMIN_TOKEN` are set, admin routes require both headers.
+
+The client automatically sends `X-Admin-Token` for admin requests (currently cleanup and blob GC) when `GRNS_ADMIN_TOKEN` is set.
 
 ## Config trust model
 
 By default, Grns does **not** auto-apply project-local config (`./.grns.toml`).
 
 - Global config (`$HOME/.grns.toml`) is loaded by default.
+- If that file is missing, Grns also checks `~/snap/grns/common/.grns.toml`.
 - Project config is loaded only when:
   - `GRNS_TRUST_PROJECT_CONFIG=true`
 - When a trusted project config is applied, CLI prints:
@@ -37,11 +40,14 @@ This reduces risk when running `grns` inside untrusted repositories.
 
 ## Bind safety
 
-By default, non-loopback bind addresses are blocked.
+By default, explicit non-loopback bind hosts are blocked.
 
-- Allowed by default: `127.0.0.1`, `localhost`
-- To allow remote bind hosts (e.g. `0.0.0.0`), set:
+- Allowed by default: `127.0.0.1`, `localhost`, other loopback IPs
+- Blocked by default (unless overridden): non-loopback hosts such as `0.0.0.0` and public/private non-loopback IPs
+- To allow remote bind hosts, set:
   - `GRNS_ALLOW_REMOTE=true`
+
+Note: hostless listen forms (for example `:7333`) are currently accepted by the host guard and may bind broadly depending on environment. For loopback-only behavior, use an explicit loopback host in `GRNS_API_URL`.
 
 ## Request and transport hardening
 
@@ -61,13 +67,14 @@ Current limits:
 - default JSON endpoints: 1 MiB
 - `/v1/projects/{project}/tasks/batch`: 8 MiB
 - `/v1/projects/{project}/import`: 64 MiB
+- `/v1/projects/{project}/import/stream`: 64 MiB
 
 ### Concurrency limiting for expensive endpoints
 
 Server-side concurrency caps are applied to:
-- import
-- export
-- heavy list queries (`search` / `spec` regex)
+- import (limit: 1)
+- export (limit: 2)
+- heavy list queries (`search` / `spec` regex) (limit: 4)
 
 Excess concurrent requests receive HTTP `429` with `resource_exhausted` and numeric `error_code`.
 
