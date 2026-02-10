@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -25,11 +27,26 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.authService.Login(r.Context(), req.Username, req.Password, time.Now().UTC())
+	now := time.Now().UTC()
+	limiterKey := loginAttemptKey(req.Username, r)
+	if s.loginLimiter != nil && !s.loginLimiter.Allow(limiterKey, now) {
+		s.writeErrorReq(w, r, http.StatusTooManyRequests, apiError{
+			status:  http.StatusTooManyRequests,
+			code:    "resource_exhausted",
+			errCode: ErrCodeResourceExhausted,
+			err:     fmt.Errorf("too many login attempts; retry later"),
+		})
+		return
+	}
+
+	result, err := s.authService.Login(r.Context(), req.Username, req.Password, now)
 	if err != nil {
 		message := strings.ToLower(strings.TrimSpace(err.Error()))
 		switch {
-		case message == "invalid credentials":
+		case errors.Is(err, errInvalidCredentials):
+			if s.loginLimiter != nil {
+				s.loginLimiter.RegisterFailure(limiterKey, now)
+			}
 			s.writeErrorReq(w, r, http.StatusUnauthorized, apiError{
 				status:  http.StatusUnauthorized,
 				code:    "unauthorized",
@@ -44,6 +61,9 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreError(w, r, err)
 			return
 		}
+	}
+	if s.loginLimiter != nil {
+		s.loginLimiter.Reset(limiterKey)
 	}
 
 	ttlSeconds := int(defaultSessionTTL / time.Second)
@@ -93,11 +113,16 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	requireAuth, err := s.apiAuthRequired(r)
-	if err != nil {
-		s.writeStoreError(w, r, err)
-		return
+	requireAuth, ok := authRequiredFromContext(r.Context())
+	if !ok {
+		computed, err := s.apiAuthRequired(r)
+		if err != nil {
+			s.writeStoreError(w, r, err)
+			return
+		}
+		requireAuth = computed
 	}
+
 	if !requireAuth {
 		s.writeJSON(w, http.StatusOK, api.AuthMeResponse{
 			Authenticated: false,
@@ -128,4 +153,31 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+func loginAttemptKey(username string, r *http.Request) string {
+	user := strings.ToLower(strings.TrimSpace(username))
+	if user == "" {
+		user = "<empty>"
+	}
+	ip := requestClientIP(r)
+	if ip == "" {
+		ip = "<unknown>"
+	}
+	return ip + "|" + user
+}
+
+func requestClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if remote == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(remote)
+	if err == nil {
+		return strings.TrimSpace(host)
+	}
+	return remote
 }

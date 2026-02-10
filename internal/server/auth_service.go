@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	internalauth "grns/internal/auth"
@@ -15,17 +17,27 @@ import (
 )
 
 const (
-	sessionCookieName = "grns_session"
-	authTypeBearer    = "bearer"
-	authTypeSession   = "session"
+	sessionCookieName           = "grns_session"
+	authTypeBearer              = "bearer"
+	authTypeSession             = "session"
+	defaultEnabledUsersCacheTTL = 5 * time.Second
 )
 
-var defaultSessionTTL = 24 * time.Hour
+var (
+	defaultSessionTTL     = 24 * time.Hour
+	errInvalidCredentials = errors.New("invalid credentials")
+)
 
 // AuthService encapsulates browser auth operations backed by the store.
 type AuthService struct {
-	store      store.AuthStore
-	sessionTTL time.Duration
+	store                store.AuthStore
+	sessionTTL           time.Duration
+	enabledUsersCacheTTL time.Duration
+
+	mu                   sync.Mutex
+	enabledUsersCached   bool
+	enabledUsersValue    bool
+	enabledUsersCachedAt time.Time
 }
 
 type authLoginResult struct {
@@ -38,21 +50,79 @@ func NewAuthService(authStore store.AuthStore) *AuthService {
 	if authStore == nil {
 		return nil
 	}
-	return &AuthService{store: authStore, sessionTTL: defaultSessionTTL}
+	return &AuthService{
+		store:                authStore,
+		sessionTTL:           defaultSessionTTL,
+		enabledUsersCacheTTL: defaultEnabledUsersCacheTTL,
+	}
 }
 
-func (a *AuthService) AuthRequired(ctx context.Context, apiTokenConfigured bool) (bool, error) {
+func (a *AuthService) AuthRequired(ctx context.Context, apiTokenConfigured, requireAuthWithUsers bool, now time.Time) (bool, error) {
 	if apiTokenConfigured {
 		return true, nil
+	}
+	if !requireAuthWithUsers {
+		return false, nil
 	}
 	if a == nil || a.store == nil {
 		return false, nil
 	}
+
+	cached, ok := a.cachedEnabledUsers(now)
+	if ok {
+		return cached, nil
+	}
+
 	count, err := a.store.CountEnabledUsers(ctx)
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	value := count > 0
+	a.setCachedEnabledUsers(now, value)
+	return value, nil
+}
+
+func (a *AuthService) cachedEnabledUsers(now time.Time) (bool, bool) {
+	if a == nil {
+		return false, false
+	}
+	if a.enabledUsersCacheTTL <= 0 {
+		return false, false
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if !a.enabledUsersCached {
+		return false, false
+	}
+	if now.Sub(a.enabledUsersCachedAt) > a.enabledUsersCacheTTL {
+		a.enabledUsersCached = false
+		return false, false
+	}
+	return a.enabledUsersValue, true
+}
+
+func (a *AuthService) setCachedEnabledUsers(now time.Time, value bool) {
+	if a == nil || a.enabledUsersCacheTTL <= 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.enabledUsersCached = true
+	a.enabledUsersValue = value
+	a.enabledUsersCachedAt = now
+}
+
+func (a *AuthService) InvalidateAuthRequiredCache() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.enabledUsersCached = false
+	a.enabledUsersCachedAt = time.Time{}
+	a.enabledUsersValue = false
 }
 
 func (a *AuthService) Login(ctx context.Context, username, password string, now time.Time) (*authLoginResult, error) {
@@ -73,7 +143,7 @@ func (a *AuthService) Login(ctx context.Context, username, password string, now 
 		return nil, err
 	}
 	if user == nil || user.Disabled || !internalauth.VerifyPassword(user.PasswordHash, password) {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, errInvalidCredentials
 	}
 
 	token, err := generateSessionToken()

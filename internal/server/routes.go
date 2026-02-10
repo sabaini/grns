@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -157,21 +158,27 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			}
 		}
 
+		ctx := contextWithAuthRequired(r.Context(), requireAuth)
 		if authenticated {
-			r = r.WithContext(contextWithAuthPrincipal(r.Context(), principal))
+			ctx = contextWithAuthPrincipal(ctx, principal)
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func (s *Server) apiAuthRequired(r *http.Request) (bool, error) {
-	if s.apiToken != "" {
-		return true, nil
-	}
-	if s.authService == nil {
+	if s == nil {
 		return false, nil
 	}
-	return s.authService.AuthRequired(r.Context(), false)
+	if s.authService == nil {
+		return s.apiToken != "", nil
+	}
+
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+	return s.authService.AuthRequired(ctx, s.apiToken != "", s.requireAuthWithUsers, time.Now().UTC())
 }
 
 func (s *Server) authorizeAPIRequest(r *http.Request) (bool, authPrincipal, error) {

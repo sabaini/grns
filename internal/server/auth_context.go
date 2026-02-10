@@ -6,7 +6,8 @@ import (
 	"grns/internal/store"
 )
 
-type authContextKey struct{}
+type authPrincipalContextKey struct{}
+type authRequiredContextKey struct{}
 
 type authPrincipal struct {
 	AuthType string
@@ -14,13 +15,25 @@ type authPrincipal struct {
 }
 
 func contextWithAuthPrincipal(ctx context.Context, principal authPrincipal) context.Context {
-	return context.WithValue(ctx, authContextKey{}, principal)
+	return context.WithValue(ctx, authPrincipalContextKey{}, principal)
 }
 
 func authPrincipalFromContext(ctx context.Context) (authPrincipal, bool) {
 	if ctx == nil {
 		return authPrincipal{}, false
 	}
-	principal, ok := ctx.Value(authContextKey{}).(authPrincipal)
+	principal, ok := ctx.Value(authPrincipalContextKey{}).(authPrincipal)
 	return principal, ok
+}
+
+func contextWithAuthRequired(ctx context.Context, required bool) context.Context {
+	return context.WithValue(ctx, authRequiredContextKey{}, required)
+}
+
+func authRequiredFromContext(ctx context.Context) (bool, bool) {
+	if ctx == nil {
+		return false, false
+	}
+	required, ok := ctx.Value(authRequiredContextKey{}).(bool)
+	return required, ok
 }

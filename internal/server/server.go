@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,17 +17,21 @@ import (
 )
 
 const (
-	apiTokenEnvKey         = "GRNS_API_TOKEN"
-	adminTokenEnvKey       = "GRNS_ADMIN_TOKEN"
-	allowRemoteEnvKey      = "GRNS_ALLOW_REMOTE"
-	defaultBlobRootDir     = ".grns/blobs"
-	readHeaderTimeout      = 5 * time.Second
-	readTimeout            = 30 * time.Second
-	writeTimeout           = 60 * time.Second
-	idleTimeout            = 60 * time.Second
-	importConcurrencyLimit = 1
-	exportConcurrencyLimit = 2
-	searchConcurrencyLimit = 4
+	apiTokenEnvKey              = "GRNS_API_TOKEN"
+	adminTokenEnvKey            = "GRNS_ADMIN_TOKEN"
+	requireAuthWithUsersEnvKey  = "GRNS_REQUIRE_AUTH_WITH_USERS"
+	allowRemoteEnvKey           = "GRNS_ALLOW_REMOTE"
+	defaultBlobRootDir          = ".grns/blobs"
+	readHeaderTimeout           = 5 * time.Second
+	readTimeout                 = 30 * time.Second
+	writeTimeout                = 60 * time.Second
+	idleTimeout                 = 60 * time.Second
+	importConcurrencyLimit      = 1
+	exportConcurrencyLimit      = 2
+	searchConcurrencyLimit      = 4
+	defaultLoginMaxFailures     = 8
+	defaultLoginFailureWindow   = 5 * time.Minute
+	defaultLoginBlockedDuration = 10 * time.Minute
 
 	defaultAttachmentUploadMaxBody   int64 = 100 << 20 // 100 MiB
 	defaultAttachmentMultipartMemory int64 = 8 << 20   // 8 MiB
@@ -45,9 +50,11 @@ type Server struct {
 	logger                    *slog.Logger
 	apiToken                  string
 	adminToken                string
+	requireAuthWithUsers      bool
 	importLimiter             chan struct{}
 	exportLimiter             chan struct{}
 	searchLimiter             chan struct{}
+	loginLimiter              *loginRateLimiter
 	attachmentUploadMaxBody   int64
 	attachmentMultipartMemory int64
 	dbPath                    string
@@ -102,9 +109,11 @@ func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *s
 		logger:                    logger,
 		apiToken:                  strings.TrimSpace(os.Getenv(apiTokenEnvKey)),
 		adminToken:                strings.TrimSpace(os.Getenv(adminTokenEnvKey)),
+		requireAuthWithUsers:      boolFromEnv(requireAuthWithUsersEnvKey),
 		importLimiter:             make(chan struct{}, importConcurrencyLimit),
 		exportLimiter:             make(chan struct{}, exportConcurrencyLimit),
 		searchLimiter:             make(chan struct{}, searchConcurrencyLimit),
+		loginLimiter:              newLoginRateLimiter(defaultLoginMaxFailures, defaultLoginFailureWindow, defaultLoginBlockedDuration),
 		attachmentUploadMaxBody:   defaultAttachmentUploadMaxBody,
 		attachmentMultipartMemory: defaultAttachmentMultipartMemory,
 	}
@@ -178,7 +187,7 @@ func isAllowedListenHost(host string) bool {
 	if host == "" {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(allowRemoteEnvKey)), "true") {
+	if boolFromEnv(allowRemoteEnvKey) {
 		return true
 	}
 	if host == "localhost" {
@@ -186,6 +195,18 @@ func isAllowedListenHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func boolFromEnv(key string) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false
+	}
+	return parsed
 }
 
 func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, r *http.Request, name string) bool {
