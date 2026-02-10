@@ -128,3 +128,48 @@ s.close()
 print(port)
 PY
 }
+
+probe_playwright_chromium_deps() {
+  local ui_dir="${1:-ui}"
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "warning: node is not installed; skipping Playwright shared library probe" >&2
+    return 0
+  fi
+
+  local browser_path=""
+  if ! browser_path="$(cd "$ui_dir" && node - <<'NODE'
+try {
+  const { chromium } = require('playwright');
+  process.stdout.write(chromium.executablePath());
+} catch (err) {
+  process.stderr.write(String(err && err.message ? err.message : err));
+  process.exit(1);
+}
+NODE
+)"; then
+    echo "warning: could not resolve Playwright Chromium executable path; skipping shared library probe" >&2
+    return 0
+  fi
+
+  if [ -z "$browser_path" ] || [ ! -e "$browser_path" ]; then
+    echo "warning: Playwright Chromium executable not found at '$browser_path'" >&2
+    echo "warning: try: cd $ui_dir && npx playwright install chromium" >&2
+    return 0
+  fi
+
+  if ! command -v ldd >/dev/null 2>&1; then
+    echo "warning: ldd not found; skipping Playwright shared library probe" >&2
+    return 0
+  fi
+
+  local missing=""
+  missing="$(ldd "$browser_path" 2>/dev/null | grep 'not found' || true)"
+  if [ -n "$missing" ]; then
+    echo "warning: Playwright Chromium has missing shared libraries:" >&2
+    echo "$missing" >&2
+    echo "warning: try: cd $ui_dir && npx playwright install --with-deps chromium" >&2
+  fi
+
+  return 0
+}

@@ -100,6 +100,32 @@ The CLI auto-spawns a local server process on first use if none is running.
 
 The server persists between CLI invocations. To force a clean state (e.g. before integration tests), kill the server process.
 
+### Web UI (preview)
+
+Grns also serves a built-in web UI from the same server process.
+
+```bash
+# start API + UI server
+grns srv
+
+# then open in your browser
+# http://127.0.0.1:7333/
+```
+
+Notes:
+- UI routes: `/` (index) and `/ui/*` (static assets).
+- API stays under `/v1/*`.
+- The UI uses hash routes like `#/` and `#/tasks/<id>`.
+- If you run with a custom `GRNS_API_URL`, open that server root in the browser.
+
+If API auth is enabled (`GRNS_API_TOKEN`), set the token in browser local storage once:
+
+```js
+localStorage.setItem('grns_api_token', '<token>')
+```
+
+Current UI scope is read-heavy task list/detail with inline edits and bulk list actions.
+
 ## Configuration
 
 Config files (TOML):

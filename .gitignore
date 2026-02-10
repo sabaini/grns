@@ -5,6 +5,7 @@ bin/
 *.out
 coverage.out
 *.coverprofile
+grns*.snap
 
 # Local runtime files
 *.db
@@ -27,3 +28,7 @@ uv.lock
 .idea/
 .DS_Store
 /.pi/
+*~
+
+# UI
+ui/node_modules/

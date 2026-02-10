@@ -66,6 +66,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{project}/deps", s.handleDeps)
 	mux.HandleFunc("GET /v1/projects/{project}/labels", s.handleLabels)
 
+	// Embedded Web UI.
+	mux.HandleFunc("GET /{$}", s.handleUIIndex)
+	mux.Handle("GET /ui/", s.uiAssetHandler())
+
 	return s.withRequestLogging(s.withAuth(s.withProjectContext(mux)))
 }
 

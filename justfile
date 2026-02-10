@@ -5,6 +5,21 @@ bin     := "bin/grns"
 build:
     go build -ldflags "{{ldflags}}" -o {{bin}} ./cmd/grns
 
+ui-build:
+    cd ui && npm run build
+
+ui-verify:
+    cd ui && npm run build
+    git diff --exit-code -- internal/server/uiassets/dist
+
+ui-test:
+    cd ui && npm ci && npm test
+
+ui-test-e2e:
+    cd ui && npm ci && npx playwright install chromium
+    bash -lc 'source tests/helpers.bash; probe_playwright_chromium_deps "ui"'
+    cd ui && npm run test:e2e
+
 snap:
     snapcraft pack -v
 
@@ -16,6 +31,8 @@ tests-all:
     just fmt-check
     just test-contracts
     just test
+    just ui-test
+    just ui-test-e2e
     just test-coverage-critical
     just test-integration
     just test-py
