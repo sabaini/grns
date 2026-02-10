@@ -71,6 +71,7 @@ async function renderListApp() {
 describe('App list behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     seedDefaultAPIMocks();
   });
 
@@ -208,5 +209,27 @@ describe('App list behavior', () => {
     });
 
     await screen.findByText('First task');
+  });
+
+  it('sign out clears local bearer fallback token', async () => {
+    const user = userEvent.setup();
+
+    api.getAuthMe
+      .mockReset()
+      .mockResolvedValueOnce({ auth_required: true, authenticated: true, username: 'admin', auth_type: 'session' })
+      .mockResolvedValue({ auth_required: false, authenticated: false });
+
+    localStorage.setItem('grns_api_token', 'test-token');
+
+    window.location.hash = '#/';
+    render(<App />);
+
+    await screen.findByText('First task');
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => {
+      expect(api.logout).toHaveBeenCalled();
+      expect(localStorage.getItem('grns_api_token')).toBeNull();
+    });
   });
 });

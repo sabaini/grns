@@ -323,6 +323,13 @@ export default function App() {
     } catch (_) {
       // keep UI flow simple even if server-side logout fails
     }
+
+    try {
+      localStorage.removeItem('grns_api_token');
+    } catch (_) {
+      // ignore storage errors to preserve sign-out flow
+    }
+
     setTasks([]);
     setTaskDetail(null);
     setAuthRefreshNonce((value) => value + 1);
