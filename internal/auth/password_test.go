@@ -11,6 +11,11 @@ func TestNormalizeUsername(t *testing.T) {
 	}{
 		{name: "valid", raw: "Admin.User", want: "admin.user"},
 		{name: "trim", raw: "  a-user  ", want: "a-user"},
+		{name: "two characters", raw: "Ab", want: "ab"},
+		{name: "max length", raw: "a123456789012345678901234567890b", want: "a123456789012345678901234567890b"},
+		{name: "too long", raw: "a123456789012345678901234567890bc", wantErr: true},
+		{name: "invalid leading punctuation", raw: ".admin", wantErr: true},
+		{name: "invalid trailing punctuation", raw: "admin-", wantErr: true},
 		{name: "invalid chars", raw: "bad space", wantErr: true},
 		{name: "empty", raw: "", wantErr: true},
 	}

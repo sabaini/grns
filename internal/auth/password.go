@@ -13,7 +13,7 @@ const (
 	maxUsernameLength = 32
 )
 
-var usernamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])?$`)
+var usernamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
 
 // NormalizeUsername returns canonical lowercase username and validates allowed characters.
 func NormalizeUsername(raw string) (string, error) {
