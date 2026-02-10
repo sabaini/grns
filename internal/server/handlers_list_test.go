@@ -108,6 +108,7 @@ func newListTestServer(t *testing.T) *Server {
 	t.Helper()
 	t.Setenv(apiTokenEnvKey, "")
 	t.Setenv(adminTokenEnvKey, "")
+	t.Setenv(requireAuthWithUsersEnvKey, "")
 
 	dbPath := filepath.Join(t.TempDir(), "grns-test.db")
 	st, err := store.Open(dbPath)

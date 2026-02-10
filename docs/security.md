@@ -7,11 +7,38 @@ This document describes runtime security controls currently implemented in Grns.
 ### Bearer token for `/v1/*`
 
 If `GRNS_API_TOKEN` is set in the server process:
-- every `/v1/*` route requires:
+- every `/v1/*` route requires authentication
+- clients may authenticate with either:
   - `Authorization: Bearer <token>`
+  - a valid browser session cookie
 - `/health` remains unauthenticated.
 
-The CLI/API client automatically sends this header when `GRNS_API_TOKEN` is set in the client environment.
+The CLI/API client automatically sends the bearer header when `GRNS_API_TOKEN` is set in the client environment.
+
+### Browser session auth (admin users)
+
+Grns supports local admin users with cookie-based browser sessions.
+
+- Admin users are provisioned out-of-band (CLI/script), e.g.:
+  - `grns admin user add <username> --password-stdin`
+- Passwords are stored as bcrypt hashes.
+- Browser login endpoints:
+  - `POST /v1/auth/login`
+  - `POST /v1/auth/logout`
+  - `GET /v1/auth/me`
+- Session cookies are `HttpOnly`, `SameSite=Lax`, path `/`, with finite expiry.
+- User-driven API auth enforcement is opt-in via `GRNS_REQUIRE_AUTH_WITH_USERS=true`.
+
+Auth enforcement behavior:
+- if `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- if `GRNS_API_TOKEN` is not set and `GRNS_REQUIRE_AUTH_WITH_USERS=true`, `/v1/*` requires a valid browser session cookie when at least one enabled admin user exists
+- if neither is true, API remains open (except optional admin-token gating)
+
+Login hardening:
+- `POST /v1/auth/login` applies server-side in-memory throttling keyed by source IP + username.
+- Excess failed attempts are rejected with HTTP `429` (`resource_exhausted`).
 
 ### Admin token for `/v1/admin/*`
 
@@ -78,6 +105,13 @@ Server-side concurrency caps are applied to:
 
 Excess concurrent requests receive HTTP `429` with `resource_exhausted` and numeric `error_code`.
 
+### CSRF guard for cookie-authenticated mutations
+
+For cookie-authenticated `POST`/`PUT`/`PATCH`/`DELETE` requests, server middleware enforces same-origin checks via `Origin` matching.
+
+- Missing or mismatched `Origin` is rejected with `403`.
+- Bearer-token authenticated requests are not subject to this cookie CSRF check.
+
 ## Error exposure
 
 For server-side internal errors (`5xx`):
@@ -88,5 +122,6 @@ For server-side internal errors (`5xx`):
 
 - Keep API bound to loopback unless remote access is explicitly required.
 - Use strong random values for `GRNS_API_TOKEN` and `GRNS_ADMIN_TOKEN`.
+- Provision admin users with strong passwords; avoid sharing one account broadly.
 - If exposing remotely, run behind TLS termination/proxy.
 - Rotate tokens periodically and after suspected compromise.

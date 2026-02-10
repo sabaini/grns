@@ -1,0 +1,79 @@
+name: Release Snap
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to Snap Store (requires SNAPCRAFT_STORE_CREDENTIALS secret)"
+        type: boolean
+        required: false
+        default: false
+      channel:
+        description: "Snap Store release channel"
+        type: choice
+        options:
+          - edge
+          - beta
+          - candidate
+          - stable
+        required: false
+        default: edge
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build snap
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build snap
+        id: build
+        uses: snapcore/action-build@v1
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grns-snap
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish snap
+    needs: build
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true && secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+
+    steps:
+      - name: Download snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: grns-snap
+          path: dist
+
+      - name: Locate snap
+        id: snap
+        run: |
+          set -euo pipefail
+          snap_file="$(find dist -maxdepth 2 -type f -name '*.snap' | head -n 1)"
+          if [ -z "${snap_file}" ]; then
+            echo "No .snap file found in dist/" >&2
+            exit 1
+          fi
+          echo "file=${snap_file}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Snap Store
+        uses: snapcore/action-publish@v1
+        with:
+          snap: ${{ steps.snap.outputs.file }}
+          release: ${{ inputs.channel }}
+          snapcraft-token: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}

@@ -67,6 +67,7 @@ func TestReadmeRuntimeEnvironmentKeysDocumented(t *testing.T) {
 		"GRNS_DB_CONN_MAX_LIFETIME",
 		"GRNS_API_TOKEN",
 		"GRNS_ADMIN_TOKEN",
+		"GRNS_REQUIRE_AUTH_WITH_USERS",
 		"GRNS_ALLOW_REMOTE",
 	})
 

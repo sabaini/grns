@@ -17,6 +17,7 @@ func newAdminCmd(cfg *config.Config, jsonOutput *bool) *cobra.Command {
 
 	cmd.AddCommand(newAdminCleanupCmd(cfg, jsonOutput))
 	cmd.AddCommand(newAdminGCBlobsCmd(cfg, jsonOutput))
+	cmd.AddCommand(newAdminUserCmd(cfg, jsonOutput))
 	return cmd
 }
 

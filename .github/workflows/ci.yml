@@ -22,8 +22,28 @@ jobs:
       - name: Contract checks (README config keys and CLI command surface)
         run: go test ./cmd/grns -run '^TestReadme' -count=1
 
-  smoke:
+  ui-test:
     needs: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci
+
+      - name: UI unit/component tests
+        working-directory: ui
+        run: npm test
+
+  smoke:
+    needs: [contracts, ui-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

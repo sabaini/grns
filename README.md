@@ -2,6 +2,13 @@
 
 Grns is a lightweight CLI task tracker for agents.
 
+Grns is a lightweight CLI task tracker for agents.
+
+This project exists because I'm not great at multitasking (few people are), and constantly switching between different clanker ("coding agent") sessions absolutely destroys my thinking process. Grns aims to support a workflow where you spec out a larger block of work, decompose it into individual tasks (likely with clanker help), load the tasks into grns and then have one or more clankers work on tasks, hopefull requireing less handholding. 
+
+xxx workflow example
+
+
 Architecture:
 
 ```text
@@ -100,6 +107,55 @@ The CLI auto-spawns a local server process on first use if none is running.
 
 The server persists between CLI invocations. To force a clean state (e.g. before integration tests), kill the server process.
 
+### Web UI (preview)
+
+Grns also serves a built-in web UI from the same server process.
+
+```bash
+# start API + UI server
+grns srv
+
+# then open in your browser
+# http://127.0.0.1:7333/
+```
+
+Notes:
+- UI routes: `/` (index) and `/ui/*` (static assets).
+- API stays under `/v1/*`.
+- The UI uses hash routes like `#/` and `#/tasks/<id>`.
+- If you run with a custom `GRNS_API_URL`, open that server root in the browser.
+
+To enable browser sign-in, provision at least one local admin user:
+
+```bash
+printf 'your-strong-password\n' | grns admin user add admin --password-stdin
+```
+
+User management helpers:
+- `grns admin user list`
+- `grns admin user disable <username>` / `grns admin user enable <username>`
+- `grns admin user delete <username>`
+
+By default, provisioning admin users enables browser sign-in endpoints but does **not** force auth for `/v1/*`.
+
+To require auth whenever local admin users exist, start the server with:
+
+```bash
+GRNS_REQUIRE_AUTH_WITH_USERS=true grns srv
+```
+
+Notes:
+- Login uses server-side HttpOnly session cookies (`/v1/auth/login`, `/v1/auth/logout`, `/v1/auth/me`).
+- For remote/network use, run behind HTTPS so cookies can be marked `Secure`.
+- If `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- If `GRNS_REQUIRE_AUTH_WITH_USERS=true` and `GRNS_API_TOKEN` is unset, `/v1/*` requires a valid browser session cookie.
+- Browser bearer-token fallback is still available via local storage:
+  - `localStorage.setItem('grns_api_token', '<token>')`
+
+Current UI scope is read-heavy task list/detail with inline edits and bulk list actions.
+
 ## Configuration
 
 Config files (TOML):
@@ -130,8 +186,9 @@ Supported config keys:
 
 ### Security-related environment variables
 
-- `GRNS_API_TOKEN` (Bearer auth for `/v1/*` API routes)
+- `GRNS_API_TOKEN` (Bearer auth credential for `/v1/*`; when set, auth is required)
 - `GRNS_ADMIN_TOKEN` (required for `/v1/admin/*` when set)
+- `GRNS_REQUIRE_AUTH_WITH_USERS=true` (require auth for `/v1/*` when at least one enabled local admin user exists)
 - `GRNS_ALLOW_REMOTE=true` (allow non-loopback server bind)
 
 See `docs/security.md` for details.
@@ -197,6 +254,11 @@ grns export [-o tasks.jsonl]
 grns info
 grns admin cleanup --older-than N [--dry-run|--force] [--project <pp>]
 grns admin gc-blobs [--dry-run|--apply] [--batch-size N]
+grns admin user add <username> --password-stdin
+grns admin user list
+grns admin user disable <username>
+grns admin user enable <username>
+grns admin user delete <username>
 grns migrate [--inspect|--dry-run]
 grns config get <key>
 grns config set <key> <value>

@@ -8,7 +8,10 @@
 Base URL: `http://127.0.0.1:7333` (default)
 
 Auth:
-- All `/v1/*` routes require `Authorization: Bearer <token>` when `GRNS_API_TOKEN` is set.
+- If `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- If `GRNS_API_TOKEN` is not set and `GRNS_REQUIRE_AUTH_WITH_USERS=true`, `/v1/*` requires a valid browser session cookie when at least one enabled local admin user exists.
 - Admin routes (`/v1/admin/*`) additionally require `X-Admin-Token: <token>` when `GRNS_ADMIN_TOKEN` is set.
 
 Timestamps are RFC3339 UTC. Error responses include `error`, `code`, and `error_code`.
@@ -54,12 +57,31 @@ Global server/database metadata across all projects.
 **Response (example):**
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "task_counts": { "open": 12, "closed": 4 },
   "total_tasks": 16,
   "projects": ["gr", "xy"]
 }
 ```
+
+### `POST /v1/auth/login`
+
+Browser login with local admin credentials.
+
+Request body:
+```json
+{ "username": "admin", "password": "..." }
+```
+
+On success returns `200` and sets an HttpOnly session cookie.
+
+### `POST /v1/auth/logout`
+
+Revokes current session cookie and clears it on the client.
+
+### `GET /v1/auth/me`
+
+Returns current auth/session state for UI bootstrap.
 
 ---
 

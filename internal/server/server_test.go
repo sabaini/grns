@@ -117,6 +117,26 @@ func TestWithAuth(t *testing.T) {
 		}
 	})
 
+	t.Run("login route bypasses auth middleware", func(t *testing.T) {
+		srv := &Server{apiToken: "token"}
+		nextCalled := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		})
+		handler := srv.withAuth(next)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", w.Code)
+		}
+		if !nextCalled {
+			t.Fatal("next handler should be called")
+		}
+	})
+
 	t.Run("admin routes require admin token when configured", func(t *testing.T) {
 		srv := &Server{apiToken: "token", adminToken: "admintoken"}
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
