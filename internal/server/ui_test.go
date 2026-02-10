@@ -119,9 +119,9 @@ func TestIsFingerprintAsset(t *testing.T) {
 	}{
 		{name: "plain", asset: "app.js", want: false},
 		{name: "short hash", asset: "app.abc123.js", want: false},
-		{name: "hex hash", asset: "app.abcdef12.js", want: true},
-		{name: "nested path", asset: "assets/app.abcdef1234.css", want: true},
-		{name: "non hex", asset: "app.zzzzzzzz.js", want: false},
+		{name: "alnum hash", asset: "app.ABC123de.js", want: true},
+		{name: "nested path", asset: "assets/app.DDBVD2RV.css", want: true},
+		{name: "symbol in hash", asset: "app.zzzz-zzz.js", want: false},
 	}
 
 	for _, tt := range tests {

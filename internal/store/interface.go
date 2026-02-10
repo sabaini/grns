@@ -22,6 +22,17 @@ type CleanupResult struct {
 	DryRun  bool     `json:"dry_run"`
 }
 
+// AuthUser represents a provisioned local admin user.
+type AuthUser struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
+	Disabled     bool      `json:"disabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 // ErrTaskNotFound indicates no matching tasks were found for a mutation.
 var ErrTaskNotFound = errors.New("task not found")
 
@@ -69,6 +80,20 @@ type TaskServiceStore interface {
 	ReopenTasks(ctx context.Context, project string, ids []string, reopenedAt time.Time) error
 }
 
+// AuthStore exposes admin-user and browser-session persistence used by auth handlers.
+type AuthStore interface {
+	CountEnabledUsers(ctx context.Context) (int, error)
+	CreateAdminUser(ctx context.Context, username, passwordHash string, now time.Time) (*AuthUser, error)
+	GetUserByUsername(ctx context.Context, username string) (*AuthUser, error)
+	GetUserByID(ctx context.Context, id string) (*AuthUser, error)
+	ListUsers(ctx context.Context) ([]AuthUser, error)
+	SetUserDisabled(ctx context.Context, username string, disabled bool, now time.Time) (*AuthUser, error)
+	DeleteUser(ctx context.Context, username string) (bool, error)
+	CreateSession(ctx context.Context, userID, tokenHash string, expiresAt, createdAt time.Time) error
+	GetUserBySessionTokenHash(ctx context.Context, tokenHash string, now time.Time) (*AuthUser, error)
+	RevokeSessionByTokenHash(ctx context.Context, tokenHash string, revokedAt time.Time) error
+}
+
 // TaskStore abstracts task storage backends.
 type TaskStore interface {
 	TaskServiceStore
@@ -81,3 +106,4 @@ type TaskStore interface {
 var _ ImportStore = (*Store)(nil)
 var _ TaskServiceStore = (*Store)(nil)
 var _ TaskStore = (*Store)(nil)
+var _ AuthStore = (*Store)(nil)

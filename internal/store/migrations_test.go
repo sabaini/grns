@@ -31,8 +31,8 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected version 8, got %d", version)
 	}
 
 	// Verify tasks table exists.
@@ -59,8 +59,8 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected version 8, got %d", version)
 	}
 }
 
@@ -111,8 +111,8 @@ func TestDetectPreMigrationDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected version 8, got %d", version)
 	}
 }
 
@@ -126,11 +126,11 @@ func TestMigrationPlan(t *testing.T) {
 	if plan.CurrentVersion != 0 {
 		t.Fatalf("expected current 0, got %d", plan.CurrentVersion)
 	}
-	if plan.AvailableVersion != 7 {
-		t.Fatalf("expected available 7, got %d", plan.AvailableVersion)
+	if plan.AvailableVersion != 8 {
+		t.Fatalf("expected available 8, got %d", plan.AvailableVersion)
 	}
-	if len(plan.Pending) != 7 {
-		t.Fatalf("expected 7 pending, got %d", len(plan.Pending))
+	if len(plan.Pending) != 8 {
+		t.Fatalf("expected 8 pending, got %d", len(plan.Pending))
 	}
 }
 
@@ -146,8 +146,8 @@ func TestMigration002UpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("current version: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("expected version 7, got %d", version)
+	if version != 8 {
+		t.Fatalf("expected version 8, got %d", version)
 	}
 
 	// Verify new columns exist by inserting a row that uses them.
@@ -487,6 +487,44 @@ func TestMigration007ProjectsScopeFoundation(t *testing.T) {
 			t.Fatal("expected project gr in projects table")
 		}
 	})
+}
+
+func TestMigration008AuthUsersAndSessions(t *testing.T) {
+	db := testRawDB(t)
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	for _, table := range []string{"users", "sessions"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count); err != nil {
+			t.Fatalf("check table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO users (id, username, password_hash, role, disabled, created_at, updated_at)
+		VALUES ('au-0001', 'admin', 'hash', 'admin', 0, datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at)
+		VALUES ('as-0001', 'au-0001', 'tokenhash', datetime('now', '+1 hour'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO users (id, username, password_hash, role, disabled, created_at, updated_at)
+		VALUES ('au-0002', 'admin', 'hash', 'admin', 0, datetime('now'), datetime('now'))
+	`); err == nil {
+		t.Fatal("expected duplicate username to violate unique constraint")
+	}
 }
 
 func containsPlan(plan, needle string) bool {

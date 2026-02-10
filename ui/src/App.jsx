@@ -3,9 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   addTaskLabels,
   closeTasks,
+  getAuthMe,
   getInfo,
   getTask,
   listTasks,
+  login,
+  logout,
   removeTaskLabels,
   reopenTasks,
   updateTask,
@@ -141,6 +144,11 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [taskDetail, setTaskDetail] = useState(null);
 
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authMe, setAuthMe] = useState(null);
+  const [authRefreshNonce, setAuthRefreshNonce] = useState(0);
+
   const [loadingInfo, setLoadingInfo] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -163,6 +171,11 @@ export default function App() {
   const [activeTaskIndex, setActiveTaskIndex] = useState(0);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
   const searchInputRef = useRef(null);
 
   const projectFromHash = (route.params.get('project') || '').trim();
@@ -171,11 +184,61 @@ export default function App() {
   const isListRoute = route.path === '/';
   const detailID = taskIDFromPath(route.path);
   const isDetailRoute = detailID !== '';
+  const canAccessAPI = !authRequired || Boolean(authMe?.authenticated);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAuthState() {
+      setAuthChecked(false);
+      setLoginError('');
+      try {
+        const me = await getAuthMe();
+        if (!alive) {
+          return;
+        }
+        const required = Boolean(me?.auth_required);
+        const authenticated = Boolean(me?.authenticated);
+        setAuthRequired(required);
+        setAuthMe(authenticated ? me : null);
+      } catch (err) {
+        if (!alive) {
+          return;
+        }
+        if (err?.status === 401) {
+          setAuthRequired(true);
+          setAuthMe(null);
+        } else {
+          setInfoError(err.message || 'Failed to load auth state');
+          setAuthRequired(false);
+          setAuthMe(null);
+        }
+      } finally {
+        if (alive) {
+          setAuthChecked(true);
+        }
+      }
+    }
+
+    loadAuthState();
+    return () => {
+      alive = false;
+    };
+  }, [authRefreshNonce]);
 
   useEffect(() => {
     let alive = true;
 
     async function loadInfo() {
+      if (!authChecked) {
+        return;
+      }
+      if (authRequired && !authMe?.authenticated) {
+        setLoadingInfo(false);
+        setInfo(null);
+        return;
+      }
+
       setLoadingInfo(true);
       setInfoError('');
       try {
@@ -200,7 +263,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [authChecked, authRequired, authMe?.authenticated]);
 
   function currentListParams() {
     const params = {
@@ -233,8 +296,40 @@ export default function App() {
     }
   }
 
+  async function onLoginSubmit(event) {
+    event.preventDefault();
+    const username = loginUsername.trim();
+    if (!username || !loginPassword) {
+      setLoginError('Username and password are required.');
+      return;
+    }
+
+    setLoggingIn(true);
+    setLoginError('');
+    try {
+      await login(username, loginPassword);
+      setLoginPassword('');
+      setAuthRefreshNonce((value) => value + 1);
+    } catch (err) {
+      setLoginError(err.message || 'Login failed');
+    } finally {
+      setLoggingIn(false);
+    }
+  }
+
+  async function onLogoutClick() {
+    try {
+      await logout();
+    } catch (_) {
+      // keep UI flow simple even if server-side logout fails
+    }
+    setTasks([]);
+    setTaskDetail(null);
+    setAuthRefreshNonce((value) => value + 1);
+  }
+
   useEffect(() => {
-    if (!isListRoute || !project) {
+    if (!canAccessAPI || !isListRoute || !project) {
       return undefined;
     }
 
@@ -264,13 +359,13 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [project, isListRoute, listState.limit, listState.offset, listState.statuses, debouncedSearch]);
+  }, [canAccessAPI, project, isListRoute, listState.limit, listState.offset, listState.statuses, debouncedSearch]);
 
   useEffect(() => {
     let alive = true;
 
     async function loadTaskDetail() {
-      if (!isDetailRoute || !project) {
+      if (!canAccessAPI || !isDetailRoute || !project) {
         setTaskDetail(null);
         return;
       }
@@ -300,7 +395,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [project, isDetailRoute, detailID]);
+  }, [canAccessAPI, project, isDetailRoute, detailID]);
 
   useEffect(() => {
     setSelectedTaskIDs((prev) => {
@@ -905,6 +1000,61 @@ export default function App() {
     }))
     .filter((entry) => entry.count > 0);
 
+  if (!authChecked) {
+    return (
+      <main className="container">
+        <h1>grns web ui</h1>
+        <div className="meta">Checking authentication…</div>
+      </main>
+    );
+  }
+
+  if (authRequired && !authMe?.authenticated) {
+    return (
+      <main className="container">
+        <header className="header">
+          <h1>grns sign in</h1>
+          <div className="meta">Sign in with a provisioned admin user.</div>
+        </header>
+
+        <form className="detail-card" onSubmit={onLoginSubmit}>
+          <div className="detail-section">
+            <label>
+              Username
+              <input
+                type="text"
+                autoComplete="username"
+                value={loginUsername}
+                onInput={(event) => setLoginUsername(event.currentTarget.value)}
+                disabled={loggingIn}
+              />
+            </label>
+          </div>
+          <div className="detail-section">
+            <label>
+              Password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={loginPassword}
+                onInput={(event) => setLoginPassword(event.currentTarget.value)}
+                disabled={loggingIn}
+              />
+            </label>
+          </div>
+          <div className="action-row">
+            <button type="submit" disabled={loggingIn}>
+              {loggingIn ? 'Signing in…' : 'Sign in'}
+            </button>
+          </div>
+        </form>
+
+        {loginError && <div className="error">{loginError}</div>}
+        {infoError && <div className="error">{infoError}</div>}
+      </main>
+    );
+  }
+
   if (isDetailRoute) {
     const labels = taskDetail?.labels || [];
     const deps = taskDetail?.deps || [];
@@ -915,6 +1065,11 @@ export default function App() {
         <header className="header">
           <h1>Task detail</h1>
           <div className="meta">{loadingInfo ? 'Loading server info…' : `project: ${project || '—'}`}</div>
+          {authMe?.authenticated && (
+            <button type="button" onClick={onLogoutClick}>
+              Sign out
+            </button>
+          )}
         </header>
 
         <a className="back-link" href={backHash}>
@@ -1119,6 +1274,11 @@ export default function App() {
         <div className="meta">
           {loadingInfo ? 'Loading server info…' : `project: ${project || '—'} · schema: ${info?.schema_version ?? '—'}`}
         </div>
+        {authMe?.authenticated && (
+          <button type="button" onClick={onLogoutClick}>
+            Sign out
+          </button>
+        )}
       </header>
 
       <section className="controls">

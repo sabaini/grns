@@ -13,6 +13,24 @@ If `GRNS_API_TOKEN` is set in the server process:
 
 The CLI/API client automatically sends this header when `GRNS_API_TOKEN` is set in the client environment.
 
+### Browser session auth (admin users)
+
+Grns supports local admin users with cookie-based browser sessions.
+
+- Admin users are provisioned out-of-band (CLI/script), e.g.:
+  - `grns admin user add <username> --password-stdin`
+- Passwords are stored as bcrypt hashes.
+- Browser login endpoints:
+  - `POST /v1/auth/login`
+  - `POST /v1/auth/logout`
+  - `GET /v1/auth/me`
+- Session cookies are `HttpOnly`, `SameSite=Lax`, path `/`, with finite expiry.
+
+Auth enforcement behavior:
+- if `GRNS_API_TOKEN` is set, bearer auth is required for `/v1/*` (as before)
+- if at least one enabled admin user exists, `/v1/*` requires auth (bearer token or session cookie)
+- if neither is true, API remains open (except optional admin-token gating)
+
 ### Admin token for `/v1/admin/*`
 
 If `GRNS_ADMIN_TOKEN` is set in the server process:
@@ -78,6 +96,13 @@ Server-side concurrency caps are applied to:
 
 Excess concurrent requests receive HTTP `429` with `resource_exhausted` and numeric `error_code`.
 
+### CSRF guard for cookie-authenticated mutations
+
+For cookie-authenticated `POST`/`PUT`/`PATCH`/`DELETE` requests, server middleware enforces same-origin checks via `Origin` matching.
+
+- Missing or mismatched `Origin` is rejected with `403`.
+- Bearer-token authenticated requests are not subject to this cookie CSRF check.
+
 ## Error exposure
 
 For server-side internal errors (`5xx`):
@@ -88,5 +113,6 @@ For server-side internal errors (`5xx`):
 
 - Keep API bound to loopback unless remote access is explicitly required.
 - Use strong random values for `GRNS_API_TOKEN` and `GRNS_ADMIN_TOKEN`.
+- Provision admin users with strong passwords; avoid sharing one account broadly.
 - If exposing remotely, run behind TLS termination/proxy.
 - Rotate tokens periodically and after suspected compromise.

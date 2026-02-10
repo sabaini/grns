@@ -48,6 +48,21 @@ type InfoResponse struct {
 	TotalTasks    int            `json:"total_tasks"`
 }
 
+// AuthLoginRequest defines the payload for browser login.
+type AuthLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// AuthMeResponse reports the caller auth state for the web UI.
+type AuthMeResponse struct {
+	Authenticated bool   `json:"authenticated"`
+	AuthRequired  bool   `json:"auth_required"`
+	Username      string `json:"username,omitempty"`
+	Role          string `json:"role,omitempty"`
+	AuthType      string `json:"auth_type,omitempty"`
+}
+
 // DepTreeResponse wraps the dependency tree output.
 type DepTreeResponse struct {
 	RootID string               `json:"root_id"`

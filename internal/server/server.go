@@ -40,6 +40,7 @@ type Server struct {
 	service                   *TaskService
 	attachmentService         *AttachmentService
 	gitRefService             *TaskGitRefService
+	authService               *AuthService
 	blobStore                 blobstore.BlobStore
 	logger                    *slog.Logger
 	apiToken                  string
@@ -106,6 +107,9 @@ func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *s
 		searchLimiter:             make(chan struct{}, searchConcurrencyLimit),
 		attachmentUploadMaxBody:   defaultAttachmentUploadMaxBody,
 		attachmentMultipartMemory: defaultAttachmentMultipartMemory,
+	}
+	if authStore, ok := any(taskStore).(store.AuthStore); ok {
+		srv.authService = NewAuthService(authStore)
 	}
 	return srv
 }

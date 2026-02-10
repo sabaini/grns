@@ -2,6 +2,13 @@
 
 Grns is a lightweight CLI task tracker for agents.
 
+Grns is a lightweight CLI task tracker for agents.
+
+This project exists because I'm not great at multitasking (few people are), and constantly switching between different clanker ("coding agent") sessions absolutely destroys my thinking process. Grns aims to support a workflow where you spec out a larger block of work, decompose it into individual tasks (likely with clanker help), load the tasks into grns and then have one or more clankers work on tasks, hopefull requireing less handholding. 
+
+xxx workflow example
+
+
 Architecture:
 
 ```text
@@ -118,11 +125,25 @@ Notes:
 - The UI uses hash routes like `#/` and `#/tasks/<id>`.
 - If you run with a custom `GRNS_API_URL`, open that server root in the browser.
 
-If API auth is enabled (`GRNS_API_TOKEN`), set the token in browser local storage once:
+To enable browser sign-in, provision at least one local admin user:
 
-```js
-localStorage.setItem('grns_api_token', '<token>')
+```bash
+printf 'your-strong-password\n' | grns admin user add admin --password-stdin
 ```
+
+User management helpers:
+- `grns admin user list`
+- `grns admin user disable <username>` / `grns admin user enable <username>`
+- `grns admin user delete <username>`
+
+When at least one admin user exists, `/v1/*` requires auth and the web UI shows a login form.
+
+Notes:
+- Login uses server-side HttpOnly session cookies (`/v1/auth/login`, `/v1/auth/logout`, `/v1/auth/me`).
+- For remote/network use, run behind HTTPS so cookies can be marked `Secure`.
+- Existing bearer-token auth (`GRNS_API_TOKEN`) still works for CLI/automation.
+- Browser bearer-token fallback is still available via local storage:
+  - `localStorage.setItem('grns_api_token', '<token>')`
 
 Current UI scope is read-heavy task list/detail with inline edits and bulk list actions.
 
@@ -223,6 +244,11 @@ grns export [-o tasks.jsonl]
 grns info
 grns admin cleanup --older-than N [--dry-run|--force] [--project <pp>]
 grns admin gc-blobs [--dry-run|--apply] [--batch-size N]
+grns admin user add <username> --password-stdin
+grns admin user list
+grns admin user disable <username>
+grns admin user enable <username>
+grns admin user delete <username>
 grns migrate [--inspect|--dry-run]
 grns config get <key>
 grns config set <key> <value>

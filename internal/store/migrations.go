@@ -252,6 +252,39 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project_updated_desc ON tasks(project_id, u
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status_updated_desc ON tasks(project_id, status, updated_at DESC);
 `,
 	},
+	{
+		Version:     8,
+		Description: "auth: add local admin users and browser sessions tables",
+		SQL: `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (role IN ('admin')),
+  CHECK (disabled IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CHECK (expires_at >= created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+`,
+	},
 }
 
 const migrationsTableSQL = `

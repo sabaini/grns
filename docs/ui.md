@@ -15,7 +15,8 @@ Build a **read-heavy, search-first** web UI for grns with minimal server changes
 | Simple edits | Create/update/close/reopen/tombstone, label add/remove |
 | Single binary | `grns srv` serves API + static UI |
 | No runtime Node | Built assets are committed and embedded in Go binary |
-| API parity | UI uses existing `/v1/projects/{project}/...` endpoints only |
+| API parity | UI uses existing `/v1/projects/{project}/...` endpoints for task/label/deps |
+| Network auth | Browser login via admin users + server-side sessions |
 | Lightweight | Small JS bundle, minimal dependencies |
 
 ## 2. Explicit Scope
@@ -32,7 +33,7 @@ Build a **read-heavy, search-first** web UI for grns with minimal server changes
 - Server-side rendering/templates
 - Websocket/SSE live updates
 - Attachment and git-ref CRUD UI
-- Multi-user session management
+- Web self-registration / password reset flows
 - Theme system/branding
 
 ---
@@ -55,7 +56,8 @@ Build a **read-heavy, search-first** web UI for grns with minimal server changes
 Key decisions:
 1. **Hash routing only** (`#/`, `#/tasks/{id}`, `#/create`).
 2. **No SPA server fallback middleware** needed.
-3. **No new API endpoints** required.
+3. **No new task-domain endpoints** required for UI features.
+4. **Auth extension adds `/v1/auth/*` endpoints** for browser session login.
 
 ### 3.1 How users run it
 
@@ -117,8 +119,13 @@ No catch-all route and no rewrite middleware.
 ### 5.3 Auth behavior
 
 - Static UI routes (`/`, `/ui/*`) are always readable.
-- API requests to `/v1/*` require bearer token when `GRNS_API_TOKEN` is set.
-- UI handles `401` by prompting for token and retrying.
+- API auth modes:
+  - **Bearer token** (existing): `Authorization: Bearer <token>`
+  - **Browser session cookie** (new): set via login endpoint
+- UI auth preference order:
+  1. valid session cookie (`/v1/auth/me`)
+  2. fallback bearer token from localStorage (legacy/dev)
+- Admin users are created out-of-band (CLI/script), not via web registration.
 
 ---
 
@@ -158,6 +165,24 @@ Bundle target: small (`index.html` + one JS + one CSS).
 | Ready preset | `GET /tasks/ready?limit=` | Ready endpoint params are limited |
 | Stale preset | `GET /tasks/stale?days=&status=&limit=` | |
 | Bootstrap | `GET /v1/info` | use `project_prefix` |
+| Session bootstrap | `GET /v1/auth/me` | returns current user/session or 401 |
+| Login | `POST /v1/auth/login` | username + password; sets HttpOnly cookie |
+| Logout | `POST /v1/auth/logout` | revokes session and clears cookie |
+
+### 7.1 Auth extension contract (browser login)
+
+New API surface:
+- `POST /v1/auth/login`
+- `POST /v1/auth/logout`
+- `GET /v1/auth/me`
+
+Server-side data model additions:
+- `users` (admin-only accounts): `id`, `username`, `password_hash`, `role`, `disabled`, timestamps
+- `sessions`: `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at`, timestamps
+
+Operational provisioning (out-of-band):
+- `grns admin user add <username> --password-stdin`
+- optional: list/disable/enable/delete commands or equivalent script wrappers
 
 Important constraints:
 - **No server sort param** today.
@@ -223,15 +248,30 @@ v1 is single active project per browser tab.
 
 ---
 
-## 10. Auth UX
+## 10. Auth UX (admin login over network)
 
-1. UI boots and calls `/v1/info`.
-2. On `401`, show token dialog.
-3. Save token to `localStorage['grns_api_token']`.
-4. Retry failed request once.
-5. On repeated `401`, show error and let user replace/clear token.
+### 10.1 Browser session flow (primary)
+
+1. UI boots and calls `/v1/auth/me`.
+2. If authenticated, continue loading app data.
+3. If `401`, render login screen (username/password).
+4. Submit login to `POST /v1/auth/login`.
+5. Server sets HttpOnly session cookie.
+6. UI retries `/v1/auth/me` and proceeds.
+7. Logout calls `POST /v1/auth/logout` and returns to login screen.
+
+### 10.2 Legacy token fallback (optional/dev)
+
+If auth endpoints are unavailable or explicitly bypassed, UI may still use:
+- `localStorage['grns_api_token']` -> bearer token header.
 
 Token is never embedded in HTML/assets.
+
+### 10.3 Cookie and CSRF requirements
+
+- Session cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, finite expiry.
+- Set `Secure` in production (TLS).
+- For cookie-authenticated mutating requests (`POST/PATCH/DELETE`), enforce same-origin checks (e.g., validate `Origin`) to prevent CSRF.
 
 ---
 
@@ -288,8 +328,16 @@ ui-verify:
 ### Phase 4 — Polish
 14. Keyboard shortcuts (`/`, `j/k`, `Enter`, `Esc`).
 15. Loading/error UI states.
-16. 401 token prompt flow.
-17. Dependency summary (`depth == 1`).
+16. Dependency summary (`depth == 1`).
+
+### Phase 5 — Browser auth (admin users)
+17. Add `users` and `sessions` migrations.
+18. Add admin user provisioning command(s) / script (`grns admin user add ...`).
+19. Add auth endpoints: `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/me`.
+20. Extend auth middleware: accept bearer token or valid session cookie.
+21. Add same-origin CSRF checks for cookie-authenticated mutating requests.
+22. Add UI login/logout screens and session bootstrap flow.
+23. Keep optional legacy token fallback for local/dev operation.
 
 ---
 
@@ -299,6 +347,17 @@ ui-verify:
   - `GET /` serves HTML
   - `GET /ui/{asset}` serves static asset (asset name taken from built index.html)
   - `/v1/*` routes still win over UI routes
+- **Frontend unit/component tests**
+  - hash parsing + list state utilities
+  - list keyboard interactions and bulk actions
+  - detail inline edit flows
+- **Frontend E2E smoke**
+  - open list, navigate to detail, verify task data visible
+- **Auth tests (Go + UI)**
+  - login success/failure
+  - session cookie accepted on `/v1/*`
+  - logout revokes session
+  - CSRF origin guard for mutating cookie-auth requests
 - **API integration smoke** (BATS)
   - list/detail/create via UI-called endpoints
 - **Asset sync check**
@@ -314,4 +373,6 @@ ui-verify:
 | Committed dist drift | `ui-verify` in CI |
 | Stale browser assets | versioned asset names (hash) in build output |
 | Feature mismatch vs API | maintain section 7 mapping as contract |
-| Token confusion | explicit 401 dialog + retry/clear flow |
+| Session misuse over plaintext transport | document TLS requirement; set `Secure` cookies in production |
+| CSRF on cookie-auth mutations | enforce same-origin (`Origin`) checks for unsafe methods |
+| Admin credential sprawl | out-of-band provisioning + disable/delete support + audit logs |

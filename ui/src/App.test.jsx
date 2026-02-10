@@ -8,9 +8,12 @@ import * as api from './api.js';
 vi.mock('./api.js', () => ({
   addTaskLabels: vi.fn(),
   closeTasks: vi.fn(),
+  getAuthMe: vi.fn(),
   getInfo: vi.fn(),
   getTask: vi.fn(),
   listTasks: vi.fn(),
+  login: vi.fn(),
+  logout: vi.fn(),
   removeTaskLabels: vi.fn(),
   reopenTasks: vi.fn(),
   updateTask: vi.fn(),
@@ -36,7 +39,8 @@ const TASKS = [
 ];
 
 function seedDefaultAPIMocks() {
-  api.getInfo.mockResolvedValue({ project_prefix: 'gr', schema_version: 7 });
+  api.getAuthMe.mockResolvedValue({ auth_required: false, authenticated: false });
+  api.getInfo.mockResolvedValue({ project_prefix: 'gr', schema_version: 8 });
   api.listTasks.mockResolvedValue(TASKS);
   api.getTask.mockResolvedValue({
     id: 'gr-aa11',
@@ -54,6 +58,8 @@ function seedDefaultAPIMocks() {
   api.removeTaskLabels.mockResolvedValue([]);
   api.closeTasks.mockResolvedValue({ ids: [] });
   api.reopenTasks.mockResolvedValue({ ids: [] });
+  api.login.mockResolvedValue({ authenticated: true, auth_required: true, username: 'admin', auth_type: 'session' });
+  api.logout.mockResolvedValue(null);
 }
 
 async function renderListApp() {
@@ -177,5 +183,30 @@ describe('App list behavior', () => {
       expect(screen.getByText('Added label(s) to 1/2 task(s).')).toBeTruthy();
       expect(screen.getByText(/Failed on 1 task\(s\): boom/)).toBeTruthy();
     });
+  });
+
+  it('shows login form when auth is required and signs in', async () => {
+    const user = userEvent.setup();
+    const unauthorized = new Error('unauthorized');
+    unauthorized.status = 401;
+
+    api.getAuthMe
+      .mockReset()
+      .mockRejectedValueOnce(unauthorized)
+      .mockResolvedValueOnce({ auth_required: true, authenticated: true, username: 'admin', auth_type: 'session' });
+
+    window.location.hash = '#/';
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'grns sign in' });
+    await user.type(screen.getByLabelText('Username'), 'admin');
+    await user.type(screen.getByLabelText('Password'), 'password-123');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => {
+      expect(api.login).toHaveBeenCalledWith('admin', 'password-123');
+    });
+
+    await screen.findByText('First task');
   });
 });

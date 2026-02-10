@@ -70,7 +70,7 @@ func isFingerprintAsset(assetPath string) bool {
 		return false
 	}
 	for _, ch := range hash {
-		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') {
 			return false
 		}
 	}

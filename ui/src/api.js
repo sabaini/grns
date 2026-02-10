@@ -12,7 +12,7 @@ export async function request(method, path, body) {
   const headers = {
     ...authHeaders(),
   };
-  const opts = { method, headers };
+  const opts = { method, headers, credentials: 'same-origin' };
 
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -38,6 +38,18 @@ export async function request(method, path, body) {
 
 export function getInfo() {
   return request('GET', '/v1/info');
+}
+
+export function getAuthMe() {
+  return request('GET', '/v1/auth/me');
+}
+
+export function login(username, password) {
+  return request('POST', '/v1/auth/login', { username, password });
+}
+
+export function logout() {
+  return request('POST', '/v1/auth/logout');
 }
 
 export function listTasks(project, params = {}) {
