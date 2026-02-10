@@ -8,8 +8,10 @@
 Base URL: `http://127.0.0.1:7333` (default)
 
 Auth:
-- All `/v1/*` routes require `Authorization: Bearer <token>` when `GRNS_API_TOKEN` is set.
-- If at least one enabled local admin user exists, `/v1/*` also supports/accepts browser session cookie auth.
+- If `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- If `GRNS_API_TOKEN` is not set and `GRNS_REQUIRE_AUTH_WITH_USERS=true`, `/v1/*` requires a valid browser session cookie when at least one enabled local admin user exists.
 - Admin routes (`/v1/admin/*`) additionally require `X-Admin-Token: <token>` when `GRNS_ADMIN_TOKEN` is set.
 
 Timestamps are RFC3339 UTC. Error responses include `error`, `code`, and `error_code`.

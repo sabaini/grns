@@ -7,11 +7,13 @@ This document describes runtime security controls currently implemented in Grns.
 ### Bearer token for `/v1/*`
 
 If `GRNS_API_TOKEN` is set in the server process:
-- every `/v1/*` route requires:
+- every `/v1/*` route requires authentication
+- clients may authenticate with either:
   - `Authorization: Bearer <token>`
+  - a valid browser session cookie
 - `/health` remains unauthenticated.
 
-The CLI/API client automatically sends this header when `GRNS_API_TOKEN` is set in the client environment.
+The CLI/API client automatically sends the bearer header when `GRNS_API_TOKEN` is set in the client environment.
 
 ### Browser session auth (admin users)
 
@@ -25,11 +27,18 @@ Grns supports local admin users with cookie-based browser sessions.
   - `POST /v1/auth/logout`
   - `GET /v1/auth/me`
 - Session cookies are `HttpOnly`, `SameSite=Lax`, path `/`, with finite expiry.
+- User-driven API auth enforcement is opt-in via `GRNS_REQUIRE_AUTH_WITH_USERS=true`.
 
 Auth enforcement behavior:
-- if `GRNS_API_TOKEN` is set, bearer auth is required for `/v1/*` (as before)
-- if at least one enabled admin user exists, `/v1/*` requires auth (bearer token or session cookie)
+- if `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- if `GRNS_API_TOKEN` is not set and `GRNS_REQUIRE_AUTH_WITH_USERS=true`, `/v1/*` requires a valid browser session cookie when at least one enabled admin user exists
 - if neither is true, API remains open (except optional admin-token gating)
+
+Login hardening:
+- `POST /v1/auth/login` applies server-side in-memory throttling keyed by source IP + username.
+- Excess failed attempts are rejected with HTTP `429` (`resource_exhausted`).
 
 ### Admin token for `/v1/admin/*`
 

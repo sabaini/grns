@@ -136,12 +136,21 @@ User management helpers:
 - `grns admin user disable <username>` / `grns admin user enable <username>`
 - `grns admin user delete <username>`
 
-When at least one admin user exists, `/v1/*` requires auth and the web UI shows a login form.
+By default, provisioning admin users enables browser sign-in endpoints but does **not** force auth for `/v1/*`.
+
+To require auth whenever local admin users exist, start the server with:
+
+```bash
+GRNS_REQUIRE_AUTH_WITH_USERS=true grns srv
+```
 
 Notes:
 - Login uses server-side HttpOnly session cookies (`/v1/auth/login`, `/v1/auth/logout`, `/v1/auth/me`).
 - For remote/network use, run behind HTTPS so cookies can be marked `Secure`.
-- Existing bearer-token auth (`GRNS_API_TOKEN`) still works for CLI/automation.
+- If `GRNS_API_TOKEN` is set, `/v1/*` requires auth and accepts either:
+  - `Authorization: Bearer <token>`
+  - a valid browser session cookie
+- If `GRNS_REQUIRE_AUTH_WITH_USERS=true` and `GRNS_API_TOKEN` is unset, `/v1/*` requires a valid browser session cookie.
 - Browser bearer-token fallback is still available via local storage:
   - `localStorage.setItem('grns_api_token', '<token>')`
 
@@ -177,8 +186,9 @@ Supported config keys:
 
 ### Security-related environment variables
 
-- `GRNS_API_TOKEN` (Bearer auth for `/v1/*` API routes)
+- `GRNS_API_TOKEN` (Bearer auth credential for `/v1/*`; when set, auth is required)
 - `GRNS_ADMIN_TOKEN` (required for `/v1/admin/*` when set)
+- `GRNS_REQUIRE_AUTH_WITH_USERS=true` (require auth for `/v1/*` when at least one enabled local admin user exists)
 - `GRNS_ALLOW_REMOTE=true` (allow non-loopback server bind)
 
 See `docs/security.md` for details.
