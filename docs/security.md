@@ -67,14 +67,12 @@ This reduces risk when running `grns` inside untrusted repositories.
 
 ## Bind safety
 
-By default, explicit non-loopback bind hosts are blocked.
+Server bind address follows `GRNS_API_URL` / `api_url` directly.
 
-- Allowed by default: `127.0.0.1`, `localhost`, other loopback IPs
-- Blocked by default (unless overridden): non-loopback hosts such as `0.0.0.0` and public/private non-loopback IPs
-- To allow remote bind hosts, set:
-  - `GRNS_ALLOW_REMOTE=true`
+- Loopback-only example: `http://127.0.0.1:7333`
+- Exposed-on-network example: `http://0.0.0.0:7333`
 
-Note: hostless listen forms (for example `:7333`) are currently accepted by the host guard and may bind broadly depending on environment. For loopback-only behavior, use an explicit loopback host in `GRNS_API_URL`.
+For loopback-only deployments, keep `api_url` explicitly on `127.0.0.1` or `localhost`.
 
 ## Request and transport hardening
 

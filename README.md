@@ -193,7 +193,6 @@ Log level precedence: `--log-level` > `GRNS_LOG_LEVEL` > `log_level` in config >
 - `GRNS_API_TOKEN` (Bearer auth credential for `/v1/*`; when set, auth is required)
 - `GRNS_ADMIN_TOKEN` (required for `/v1/admin/*` when set)
 - `GRNS_REQUIRE_AUTH_WITH_USERS=true` (require auth for `/v1/*` when at least one enabled local admin user exists)
-- `GRNS_ALLOW_REMOTE=true` (allow non-loopback server bind)
 
 See `docs/security.md` for details.
 

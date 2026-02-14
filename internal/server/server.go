@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,7 +19,6 @@ const (
 	apiTokenEnvKey              = "GRNS_API_TOKEN"
 	adminTokenEnvKey            = "GRNS_ADMIN_TOKEN"
 	requireAuthWithUsersEnvKey  = "GRNS_REQUIRE_AUTH_WITH_USERS"
-	allowRemoteEnvKey           = "GRNS_ALLOW_REMOTE"
 	defaultBlobRootDir          = ".grns/blobs"
 	readHeaderTimeout           = 5 * time.Second
 	readTimeout                 = 30 * time.Second
@@ -205,33 +203,9 @@ func ListenAddr(apiURL string) (string, error) {
 		return "", fmt.Errorf("api url is required")
 	}
 	if u, err := url.Parse(apiURL); err == nil && u.Host != "" {
-		host := u.Hostname()
-		if !isAllowedListenHost(host) {
-			return "", fmt.Errorf("remote listen host %q requires %s=true", host, allowRemoteEnvKey)
-		}
 		return u.Host, nil
 	}
-
-	host, _, err := net.SplitHostPort(apiURL)
-	if err == nil && !isAllowedListenHost(host) {
-		return "", fmt.Errorf("remote listen host %q requires %s=true", host, allowRemoteEnvKey)
-	}
-
 	return apiURL, nil
-}
-
-func isAllowedListenHost(host string) bool {
-	if host == "" {
-		return true
-	}
-	if boolFromEnv(allowRemoteEnvKey) {
-		return true
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func boolFromEnv(key string) bool {

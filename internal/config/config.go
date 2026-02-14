@@ -44,21 +44,25 @@ type AttachmentConfig struct {
 
 // Config defines runtime configuration for grns.
 type Config struct {
-	ProjectPrefix            string           `toml:"project_prefix"`
-	APIURL                   string           `toml:"api_url"`
-	DBPath                   string           `toml:"db_path"`
-	LogLevel                 string           `toml:"log_level"`
-	Attachments              AttachmentConfig `toml:"attachments"`
-	TrustedProjectConfigPath string           `toml:"-"`
+	ProjectPrefix            string            `toml:"project_prefix"`
+	APIURL                   string            `toml:"api_url"`
+	DBPath                   string            `toml:"db_path"`
+	LogLevel                 string            `toml:"log_level"`
+	Attachments              AttachmentConfig  `toml:"attachments"`
+	TrustedProjectConfigPath string            `toml:"-"`
+	ValueSources             map[string]string `toml:"-"`
+	LoadedConfigPaths        []string          `toml:"-"`
 }
 
 // Default returns default configuration values.
 func Default() Config {
 	return Config{
-		ProjectPrefix: DefaultProjectPrefix,
-		APIURL:        DefaultAPIURL,
-		DBPath:        "",
-		LogLevel:      DefaultLogLevel,
+		ProjectPrefix:     DefaultProjectPrefix,
+		APIURL:            DefaultAPIURL,
+		DBPath:            "",
+		LogLevel:          DefaultLogLevel,
+		ValueSources:      defaultValueSources(),
+		LoadedConfigPaths: nil,
 		Attachments: AttachmentConfig{
 			MaxUploadBytes:          DefaultAttachmentMaxUploadBytes,
 			MultipartMaxMemory:      DefaultAttachmentMultipartMemory,
@@ -70,25 +74,45 @@ func Default() Config {
 }
 
 func loadFile(path string, cfg *Config) error {
-	_, err := loadFileIfExists(path, cfg)
+	_, _, err := loadFileIfExistsWithKeys(path, cfg)
 	return err
 }
 
 func loadFileIfExists(path string, cfg *Config) (bool, error) {
+	loaded, _, err := loadFileIfExistsWithKeys(path, cfg)
+	return loaded, err
+}
+
+func loadFileIfExistsWithKeys(path string, cfg *Config) (bool, []string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return false, nil, nil
 		}
-		return false, err
+		return false, nil, err
 	}
 	if info.IsDir() {
-		return false, nil
+		return false, nil, nil
 	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return false, fmt.Errorf("failed to parse config %s: %w", path, err)
+	metadata, err := toml.DecodeFile(path, cfg)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to parse config %s: %w", path, err)
 	}
-	return true, nil
+	return true, metadataKeys(metadata.Keys()), nil
+}
+
+func metadataKeys(keys []toml.Key) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if len(key) == 0 {
+			continue
+		}
+		out = append(out, key.String())
+	}
+	return out
 }
 
 func overrideConfigPath() (string, bool) {
@@ -169,6 +193,71 @@ var allowedKeys = []string{
 	"attachments.allowed_media_types",
 	"attachments.reject_media_type_mismatch",
 	"attachments.gc_batch_size",
+}
+
+func defaultValueSources() map[string]string {
+	sources := make(map[string]string, len(allowedKeys))
+	for _, key := range allowedKeys {
+		sources[key] = "default"
+	}
+	return sources
+}
+
+func (c *Config) setSource(key, source string) {
+	if c == nil || key == "" || !IsAllowedKey(key) {
+		return
+	}
+	if c.ValueSources == nil {
+		c.ValueSources = defaultValueSources()
+	}
+	c.ValueSources[key] = source
+}
+
+func (c *Config) setSources(keys []string, source string) {
+	for _, key := range keys {
+		c.setSource(key, source)
+	}
+}
+
+func (c *Config) addLoadedConfigPath(path string) {
+	if c == nil {
+		return
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	for _, existing := range c.LoadedConfigPaths {
+		if existing == path {
+			return
+		}
+	}
+	c.LoadedConfigPaths = append(c.LoadedConfigPaths, path)
+}
+
+// Source returns where a given config key was resolved from.
+func (c *Config) Source(key string) string {
+	if c == nil || !IsAllowedKey(key) {
+		return ""
+	}
+	if c.ValueSources == nil {
+		return "default"
+	}
+	source := strings.TrimSpace(c.ValueSources[key])
+	if source == "" {
+		return "default"
+	}
+	return source
+}
+
+// LoadedPaths returns config files that were successfully loaded.
+func (c *Config) LoadedPaths() []string {
+	if c == nil || len(c.LoadedConfigPaths) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.LoadedConfigPaths))
+	copy(out, c.LoadedConfigPaths)
+	return out
 }
 
 // AllowedKeys returns the set of valid config keys.
@@ -288,23 +377,34 @@ func Load() (*Config, error) {
 	cfg := Default()
 
 	if overridePath, ok := overrideConfigPath(); ok {
-		if err := loadFile(overridePath, &cfg); err != nil {
+		loaded, keys, err := loadFileIfExistsWithKeys(overridePath, &cfg)
+		if err != nil {
 			return nil, err
+		}
+		if loaded {
+			cfg.setSources(keys, "file:"+overridePath)
+			cfg.addLoadedConfigPath(overridePath)
 		}
 	} else {
 		if home, err := os.UserHomeDir(); err == nil {
 			homePath := filepath.Join(home, ".grns.toml")
-			loaded, loadErr := loadFileIfExists(homePath, &cfg)
+			loaded, keys, loadErr := loadFileIfExistsWithKeys(homePath, &cfg)
 			if loadErr != nil {
 				return nil, loadErr
 			}
+			if loaded {
+				cfg.setSources(keys, "file:"+homePath)
+				cfg.addLoadedConfigPath(homePath)
+			}
 			if !loaded {
 				for _, path := range snapFallbackConfigPaths(home) {
-					loaded, loadErr = loadFileIfExists(path, &cfg)
+					loaded, keys, loadErr = loadFileIfExistsWithKeys(path, &cfg)
 					if loadErr != nil {
 						return nil, loadErr
 					}
 					if loaded {
+						cfg.setSources(keys, "file:"+path)
+						cfg.addLoadedConfigPath(path)
 						break
 					}
 				}
@@ -317,8 +417,13 @@ func Load() (*Config, error) {
 				info, statErr := os.Stat(projectPath)
 				switch {
 				case statErr == nil && !info.IsDir():
-					if err := loadFile(projectPath, &cfg); err != nil {
+					loaded, keys, err := loadFileIfExistsWithKeys(projectPath, &cfg)
+					if err != nil {
 						return nil, err
+					}
+					if loaded {
+						cfg.setSources(keys, "file:"+projectPath)
+						cfg.addLoadedConfigPath(projectPath)
 					}
 					cfg.TrustedProjectConfigPath = projectPath
 				case statErr != nil && !os.IsNotExist(statErr):
@@ -331,25 +436,31 @@ func Load() (*Config, error) {
 	if cfg.DBPath == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			cfg.DBPath = filepath.Join(cwd, DefaultDBFileName)
+			cfg.setSource("db_path", "default:workspace")
 		}
 	}
 	if strings.TrimSpace(cfg.LogLevel) == "" {
 		cfg.LogLevel = DefaultLogLevel
+		cfg.setSource("log_level", "default")
 	}
 
-	if apiURL := os.Getenv("GRNS_API_URL"); apiURL != "" {
+	if apiURL := strings.TrimSpace(os.Getenv("GRNS_API_URL")); apiURL != "" {
 		cfg.APIURL = apiURL
+		cfg.setSource("api_url", "env:GRNS_API_URL")
 	}
-	if dbPath := os.Getenv("GRNS_DB"); dbPath != "" {
+	if dbPath := strings.TrimSpace(os.Getenv("GRNS_DB")); dbPath != "" {
 		cfg.DBPath = dbPath
+		cfg.setSource("db_path", "env:GRNS_DB")
 	}
 
 	if raw := strings.TrimSpace(os.Getenv(attachmentAllowedMediaTypesEnvKey)); raw != "" {
 		cfg.Attachments.AllowedMediaTypes = splitCSV(raw)
+		cfg.setSource("attachments.allowed_media_types", "env:"+attachmentAllowedMediaTypesEnvKey)
 	}
 	if raw := strings.TrimSpace(os.Getenv(attachmentRejectMismatchEnvKey)); raw != "" {
 		if parsed, err := strconv.ParseBool(raw); err == nil {
 			cfg.Attachments.RejectMediaTypeMismatch = parsed
+			cfg.setSource("attachments.reject_media_type_mismatch", "env:"+attachmentRejectMismatchEnvKey)
 		}
 	}
 

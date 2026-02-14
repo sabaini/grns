@@ -46,9 +46,12 @@ sudo snap stop grns.daemon
 
 The daemon uses:
 
-- `GRNS_API_URL=http://127.0.0.1:7333`
 - `GRNS_DB=$SNAP_COMMON/grns.db` (typically `/var/snap/grns/common/grns.db`)
 - `GRNS_CONFIG_DIR=$SNAP_COMMON`
+
+The bind address is resolved from config/env precedence (`GRNS_API_URL` > `api_url` in `$SNAP_COMMON/.grns.toml` > default `http://127.0.0.1:7333`).
+
+Set `api_url` in `$SNAP_COMMON/.grns.toml` (or `GRNS_API_URL` in daemon env) to control the daemon bind address.
 
 ## CI release workflow
 

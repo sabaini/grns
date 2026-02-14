@@ -9,33 +9,33 @@ import (
 	"grns/internal/api"
 )
 
-func TestListenAddrRemoteGuard(t *testing.T) {
-	t.Run("allows loopback", func(t *testing.T) {
-		t.Setenv(allowRemoteEnvKey, "")
+func TestListenAddr(t *testing.T) {
+	t.Run("parses host from api url", func(t *testing.T) {
 		addr, err := ListenAddr("http://127.0.0.1:7333")
 		if err != nil {
-			t.Fatalf("expected loopback to be allowed, got error: %v", err)
+			t.Fatalf("expected parsed host, got error: %v", err)
 		}
 		if addr != "127.0.0.1:7333" {
 			t.Fatalf("unexpected addr: %s", addr)
 		}
 	})
 
-	t.Run("blocks non-loopback by default", func(t *testing.T) {
-		t.Setenv(allowRemoteEnvKey, "")
-		_, err := ListenAddr("http://0.0.0.0:7333")
-		if err == nil {
-			t.Fatal("expected error for non-loopback listen host")
+	t.Run("allows non-loopback host without guard", func(t *testing.T) {
+		addr, err := ListenAddr("http://0.0.0.0:7333")
+		if err != nil {
+			t.Fatalf("expected non-loopback host to be allowed, got error: %v", err)
+		}
+		if addr != "0.0.0.0:7333" {
+			t.Fatalf("unexpected addr: %s", addr)
 		}
 	})
 
-	t.Run("allows non-loopback when explicitly enabled", func(t *testing.T) {
-		t.Setenv(allowRemoteEnvKey, "true")
-		addr, err := ListenAddr("http://0.0.0.0:7333")
+	t.Run("returns raw hostport when not a url", func(t *testing.T) {
+		addr, err := ListenAddr("10.0.0.70:7333")
 		if err != nil {
-			t.Fatalf("expected allow-remote to permit host, got error: %v", err)
+			t.Fatalf("expected raw hostport to be accepted, got error: %v", err)
 		}
-		if addr != "0.0.0.0:7333" {
+		if addr != "10.0.0.70:7333" {
 			t.Fatalf("unexpected addr: %s", addr)
 		}
 	})

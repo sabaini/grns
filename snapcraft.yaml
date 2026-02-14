@@ -31,7 +31,6 @@ apps:
       - network
       - network-bind
     environment:
-      GRNS_API_URL: http://127.0.0.1:7333
       GRNS_DB: $SNAP_COMMON/grns.db
       GRNS_CONFIG_DIR: $SNAP_COMMON
 

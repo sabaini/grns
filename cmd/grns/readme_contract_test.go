@@ -68,7 +68,6 @@ func TestReadmeRuntimeEnvironmentKeysDocumented(t *testing.T) {
 		"GRNS_API_TOKEN",
 		"GRNS_ADMIN_TOKEN",
 		"GRNS_REQUIRE_AUTH_WITH_USERS",
-		"GRNS_ALLOW_REMOTE",
 	})
 
 	missing := diff(required, documented)

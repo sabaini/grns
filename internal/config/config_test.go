@@ -297,6 +297,12 @@ func TestEnvOverrides(t *testing.T) {
 	if cfg.DBPath != "/tmp/override.db" {
 		t.Fatalf("expected env override for DB path, got %q", cfg.DBPath)
 	}
+	if got := cfg.Source("api_url"); got != "env:GRNS_API_URL" {
+		t.Fatalf("expected api_url source env override, got %q", got)
+	}
+	if got := cfg.Source("db_path"); got != "env:GRNS_DB" {
+		t.Fatalf("expected db_path source env override, got %q", got)
+	}
 }
 
 func TestLoadFallsBackToDefaultLogLevelWhenConfiguredEmpty(t *testing.T) {
@@ -327,6 +333,44 @@ func TestLoadFallsBackToDefaultLogLevelWhenConfiguredEmpty(t *testing.T) {
 	}
 	if cfg.LogLevel != DefaultLogLevel {
 		t.Fatalf("expected default log level %q, got %q", DefaultLogLevel, cfg.LogLevel)
+	}
+}
+
+func TestLoadTracksFileSourcesAndLoadedPaths(t *testing.T) {
+	homeDir := t.TempDir()
+	workspace := t.TempDir()
+	homePath := filepath.Join(homeDir, ".grns.toml")
+	if err := os.WriteFile(homePath, []byte("api_url = \"http://127.0.0.1:9555\"\nproject_prefix = \"xy\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir workspace: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Source("api_url"); got != "file:"+homePath {
+		t.Fatalf("expected api_url source %q, got %q", "file:"+homePath, got)
+	}
+	if got := cfg.Source("project_prefix"); got != "file:"+homePath {
+		t.Fatalf("expected project_prefix source %q, got %q", "file:"+homePath, got)
+	}
+	loadedPaths := cfg.LoadedPaths()
+	if len(loadedPaths) != 1 || loadedPaths[0] != homePath {
+		t.Fatalf("expected loaded config path %q, got %v", homePath, loadedPaths)
 	}
 }
 
