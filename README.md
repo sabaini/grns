@@ -159,7 +159,7 @@ Current UI scope is read-heavy task list/detail with inline edits and bulk list 
 ## Configuration
 
 Config files (TOML):
-- Global: `$HOME/.grns.toml` (fallback: `~/snap/grns/common/.grns.toml` when `$HOME/.grns.toml` is missing)
+- Global: `$HOME/.grns.toml` (fallbacks when missing: `$SNAP_COMMON/.grns.toml` if `$SNAP_COMMON` is set, then `~/snap/grns/common/.grns.toml`)
 - Project: `.grns.toml` in current workspace (**loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`**)
 
 Supported config keys:

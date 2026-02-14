@@ -24,6 +24,7 @@ const (
 
 	configDirEnvKey          = "GRNS_CONFIG_DIR"
 	trustProjectConfigEnvKey = "GRNS_TRUST_PROJECT_CONFIG"
+	snapCommonEnvKey         = "SNAP_COMMON"
 
 	attachmentAllowedMediaTypesEnvKey = "GRNS_ATTACH_ALLOWED_MEDIA_TYPES"
 	attachmentRejectMismatchEnvKey    = "GRNS_ATTACH_REJECT_MEDIA_TYPE_MISMATCH"
@@ -107,6 +108,54 @@ func trustProjectConfig() bool {
 	return value
 }
 
+func snapCommonConfigPath() (string, bool) {
+	dir := strings.TrimSpace(os.Getenv(snapCommonEnvKey))
+	if dir == "" {
+		return "", false
+	}
+	return filepath.Join(dir, ".grns.toml"), true
+}
+
+func snapFallbackConfigPaths(home string) []string {
+	paths := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	addPath := func(path string) {
+		if path == "" {
+			return
+		}
+		cleanPath := filepath.Clean(path)
+		if _, ok := seen[cleanPath]; ok {
+			return
+		}
+		seen[cleanPath] = struct{}{}
+		paths = append(paths, path)
+	}
+
+	if snapPath, ok := snapCommonConfigPath(); ok {
+		addPath(snapPath)
+	}
+	addPath(filepath.Join(home, snapCommonConfigRelativePath))
+
+	return paths
+}
+
+func firstExistingFilePath(paths []string) (string, bool, error) {
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		switch {
+		case err == nil && !info.IsDir():
+			return path, true, nil
+		case err == nil && info.IsDir():
+			continue
+		case err != nil && os.IsNotExist(err):
+			continue
+		default:
+			return "", false, err
+		}
+	}
+	return "", false, nil
+}
+
 var allowedKeys = []string{
 	"project_prefix",
 	"api_url",
@@ -168,17 +217,15 @@ func GlobalPath() (string, error) {
 	}
 
 	homePath := filepath.Join(home, ".grns.toml")
-	if info, statErr := os.Stat(homePath); statErr == nil && !info.IsDir() {
-		return homePath, nil
-	} else if statErr != nil && !os.IsNotExist(statErr) {
-		return "", statErr
-	}
+	candidatePaths := []string{homePath}
+	candidatePaths = append(candidatePaths, snapFallbackConfigPaths(home)...)
 
-	snapPath := filepath.Join(home, snapCommonConfigRelativePath)
-	if info, statErr := os.Stat(snapPath); statErr == nil && !info.IsDir() {
-		return snapPath, nil
-	} else if statErr != nil && !os.IsNotExist(statErr) {
-		return "", statErr
+	existingPath, found, err := firstExistingFilePath(candidatePaths)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return existingPath, nil
 	}
 
 	return homePath, nil
@@ -241,14 +288,19 @@ func Load() (*Config, error) {
 	} else {
 		if home, err := os.UserHomeDir(); err == nil {
 			homePath := filepath.Join(home, ".grns.toml")
-			homeLoaded, loadErr := loadFileIfExists(homePath, &cfg)
+			loaded, loadErr := loadFileIfExists(homePath, &cfg)
 			if loadErr != nil {
 				return nil, loadErr
 			}
-			if !homeLoaded {
-				snapPath := filepath.Join(home, snapCommonConfigRelativePath)
-				if err := loadFile(snapPath, &cfg); err != nil {
-					return nil, err
+			if !loaded {
+				for _, path := range snapFallbackConfigPaths(home) {
+					loaded, loadErr = loadFileIfExists(path, &cfg)
+					if loadErr != nil {
+						return nil, loadErr
+					}
+					if loaded {
+						break
+					}
 				}
 			}
 		}

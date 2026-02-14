@@ -4,7 +4,7 @@ Grns reads config from TOML and supports runtime overrides via environment varia
 
 ## File locations
 
-- Global: `$HOME/.grns.toml`
+- Global: `$HOME/.grns.toml` (fallbacks when missing: `$SNAP_COMMON/.grns.toml` if `$SNAP_COMMON` is set, then `~/snap/grns/common/.grns.toml`)
 - Project: `./.grns.toml` (loaded only when `GRNS_TRUST_PROJECT_CONFIG=true`)
 - Override location: set `GRNS_CONFIG_DIR`, then Grns reads `$GRNS_CONFIG_DIR/.grns.toml`
 

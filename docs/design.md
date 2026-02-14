@@ -143,7 +143,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - `GRNS_API_URL` env var overrides the server base URL (default `http://127.0.0.1:7333`).
 
 ## Config
-- Global config: `$HOME/.grns.toml` (fallback: `~/snap/grns/common/.grns.toml` when missing)
+- Global config: `$HOME/.grns.toml` (fallbacks when missing: `$SNAP_COMMON/.grns.toml` if `$SNAP_COMMON` is set, then `~/snap/grns/common/.grns.toml`)
 - Project config: `.grns.toml` in the workspace root (overrides global).
 
 ### Config Keys (MVP)

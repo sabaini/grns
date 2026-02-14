@@ -383,6 +383,39 @@ func TestLoadDoesNotTrustProjectConfigOnInvalidEnvValue(t *testing.T) {
 	}
 }
 
+func TestLoadFallsBackToSnapCommonEnvConfigWhenHomeConfigMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	workspace := t.TempDir()
+	snapCommonDir := t.TempDir()
+	snapConfigPath := filepath.Join(snapCommonDir, ".grns.toml")
+	if err := os.WriteFile(snapConfigPath, []byte("project_prefix = \"sc\"\n"), 0o644); err != nil {
+		t.Fatalf("write snap common env config: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir workspace: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", snapCommonDir)
+	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ProjectPrefix != "sc" {
+		t.Fatalf("expected snap common env config prefix 'sc', got %q", cfg.ProjectPrefix)
+	}
+}
+
 func TestLoadFallsBackToSnapCommonConfigWhenHomeConfigMissing(t *testing.T) {
 	homeDir := t.TempDir()
 	workspace := t.TempDir()
@@ -407,6 +440,7 @@ func TestLoadFallsBackToSnapCommonConfigWhenHomeConfigMissing(t *testing.T) {
 	}
 
 	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", "")
 	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
 
 	cfg, err := Load()
@@ -418,19 +452,21 @@ func TestLoadFallsBackToSnapCommonConfigWhenHomeConfigMissing(t *testing.T) {
 	}
 }
 
-func TestLoadPrefersHomeConfigOverSnapCommonConfig(t *testing.T) {
+func TestLoadPrefersSnapCommonEnvConfigOverLegacySnapCommonConfig(t *testing.T) {
 	homeDir := t.TempDir()
 	workspace := t.TempDir()
+	snapCommonDir := t.TempDir()
 
-	if err := os.WriteFile(filepath.Join(homeDir, ".grns.toml"), []byte("project_prefix = \"hm\"\n"), 0o644); err != nil {
-		t.Fatalf("write home config: %v", err)
+	legacySnapPath := filepath.Join(homeDir, "snap", "grns", "common", ".grns.toml")
+	if err := os.MkdirAll(filepath.Dir(legacySnapPath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy snap config dir: %v", err)
 	}
-	snapConfigPath := filepath.Join(homeDir, "snap", "grns", "common", ".grns.toml")
-	if err := os.MkdirAll(filepath.Dir(snapConfigPath), 0o755); err != nil {
-		t.Fatalf("mkdir snap config dir: %v", err)
+	if err := os.WriteFile(legacySnapPath, []byte("project_prefix = \"sn\"\n"), 0o644); err != nil {
+		t.Fatalf("write legacy snap config: %v", err)
 	}
-	if err := os.WriteFile(snapConfigPath, []byte("project_prefix = \"sn\"\n"), 0o644); err != nil {
-		t.Fatalf("write snap config: %v", err)
+	envSnapPath := filepath.Join(snapCommonDir, ".grns.toml")
+	if err := os.WriteFile(envSnapPath, []byte("project_prefix = \"sc\"\n"), 0o644); err != nil {
+		t.Fatalf("write snap common env config: %v", err)
 	}
 
 	oldWD, err := os.Getwd()
@@ -445,6 +481,51 @@ func TestLoadPrefersHomeConfigOverSnapCommonConfig(t *testing.T) {
 	}
 
 	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", snapCommonDir)
+	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ProjectPrefix != "sc" {
+		t.Fatalf("expected SNAP_COMMON config prefix 'sc', got %q", cfg.ProjectPrefix)
+	}
+}
+
+func TestLoadPrefersHomeConfigOverSnapCommonConfig(t *testing.T) {
+	homeDir := t.TempDir()
+	workspace := t.TempDir()
+	snapCommonDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(homeDir, ".grns.toml"), []byte("project_prefix = \"hm\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+	legacySnapPath := filepath.Join(homeDir, "snap", "grns", "common", ".grns.toml")
+	if err := os.MkdirAll(filepath.Dir(legacySnapPath), 0o755); err != nil {
+		t.Fatalf("mkdir snap config dir: %v", err)
+	}
+	if err := os.WriteFile(legacySnapPath, []byte("project_prefix = \"sn\"\n"), 0o644); err != nil {
+		t.Fatalf("write snap config: %v", err)
+	}
+	envSnapPath := filepath.Join(snapCommonDir, ".grns.toml")
+	if err := os.WriteFile(envSnapPath, []byte("project_prefix = \"sc\"\n"), 0o644); err != nil {
+		t.Fatalf("write snap common env config: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir workspace: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", snapCommonDir)
 	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
 
 	cfg, err := Load()
@@ -453,6 +534,26 @@ func TestLoadPrefersHomeConfigOverSnapCommonConfig(t *testing.T) {
 	}
 	if cfg.ProjectPrefix != "hm" {
 		t.Fatalf("expected home config prefix 'hm', got %q", cfg.ProjectPrefix)
+	}
+}
+
+func TestGlobalPathFallsBackToSnapCommonEnvWhenHomeConfigMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	snapCommonDir := t.TempDir()
+	snapConfigPath := filepath.Join(snapCommonDir, ".grns.toml")
+	if err := os.WriteFile(snapConfigPath, []byte("project_prefix = \"sc\"\n"), 0o644); err != nil {
+		t.Fatalf("write snap common env config: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", snapCommonDir)
+
+	path, err := GlobalPath()
+	if err != nil {
+		t.Fatalf("global path: %v", err)
+	}
+	if path != snapConfigPath {
+		t.Fatalf("expected SNAP_COMMON global path %q, got %q", snapConfigPath, path)
 	}
 }
 
@@ -467,6 +568,7 @@ func TestGlobalPathFallsBackToSnapCommonWhenHomeConfigMissing(t *testing.T) {
 	}
 
 	t.Setenv("HOME", homeDir)
+	t.Setenv("SNAP_COMMON", "")
 
 	path, err := GlobalPath()
 	if err != nil {

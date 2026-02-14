@@ -55,7 +55,7 @@ The client automatically sends `X-Admin-Token` for admin requests (currently cle
 By default, Grns does **not** auto-apply project-local config (`./.grns.toml`).
 
 - Global config (`$HOME/.grns.toml`) is loaded by default.
-- If that file is missing, Grns also checks `~/snap/grns/common/.grns.toml`.
+- If that file is missing, Grns also checks `$SNAP_COMMON/.grns.toml` (when `$SNAP_COMMON` is set), then `~/snap/grns/common/.grns.toml`.
 - Project config is loaded only when:
   - `GRNS_TRUST_PROJECT_CONFIG=true`
 - When a trusted project config is applied, CLI prints:
