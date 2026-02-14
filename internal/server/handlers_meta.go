@@ -25,5 +25,6 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		TotalTasks:    info.TotalTasks,
 	}
 
+	s.log().Debug("info requested", "schema_version", resp.SchemaVersion, "total_tasks", resp.TotalTasks)
 	s.writeJSON(w, http.StatusOK, resp)
 }

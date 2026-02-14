@@ -27,9 +27,11 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("auth login attempt", "remote_addr", r.RemoteAddr, "username_present", strings.TrimSpace(req.Username) != "")
 	now := time.Now().UTC()
 	limiterKey := loginAttemptKey(req.Username, r)
 	if s.loginLimiter != nil && !s.loginLimiter.Allow(limiterKey, now) {
+		s.log().Debug("auth login rate limited", "remote_addr", r.RemoteAddr)
 		s.writeErrorReq(w, r, http.StatusTooManyRequests, apiError{
 			status:  http.StatusTooManyRequests,
 			code:    "resource_exhausted",
@@ -47,6 +49,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			if s.loginLimiter != nil {
 				s.loginLimiter.RegisterFailure(limiterKey, now)
 			}
+			s.log().Debug("auth login failed", "reason", "invalid_credentials", "remote_addr", r.RemoteAddr)
 			s.writeErrorReq(w, r, http.StatusUnauthorized, apiError{
 				status:  http.StatusUnauthorized,
 				code:    "unauthorized",
@@ -81,6 +84,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  result.ExpiresAt,
 	})
 
+	s.log().Debug("auth login succeeded", "remote_addr", r.RemoteAddr, "auth_type", authTypeSession)
 	s.writeJSON(w, http.StatusOK, api.AuthMeResponse{
 		Authenticated: true,
 		AuthRequired:  true,
@@ -99,6 +103,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.log().Debug("auth logout", "remote_addr", r.RemoteAddr, "had_session", token != "")
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -124,6 +129,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !requireAuth {
+		s.log().Debug("auth me", "authenticated", false, "auth_required", false)
 		s.writeJSON(w, http.StatusOK, api.AuthMeResponse{
 			Authenticated: false,
 			AuthRequired:  false,
@@ -152,6 +158,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		resp.Role = principal.User.Role
 	}
 
+	s.log().Debug("auth me", "authenticated", true, "auth_required", true, "auth_type", resp.AuthType)
 	s.writeJSON(w, http.StatusOK, resp)
 }
 

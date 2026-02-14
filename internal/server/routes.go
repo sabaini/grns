@@ -126,6 +126,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				return
 			}
 			if !authenticated {
+				s.log().Debug("request unauthorized", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 				s.writeErrorReq(w, r, http.StatusUnauthorized, apiError{
 					status:  http.StatusUnauthorized,
 					code:    "unauthorized",
@@ -134,7 +135,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				})
 				return
 			}
+			s.log().Debug("request authenticated", "method", r.Method, "path", r.URL.Path, "auth_type", principal.AuthType)
 			if principal.AuthType == authTypeSession && isUnsafeMethod(r.Method) && !sameOrigin(r) {
+				s.log().Debug("request forbidden by same-origin policy", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 				s.writeErrorReq(w, r, http.StatusForbidden, apiError{
 					status:  http.StatusForbidden,
 					code:    "forbidden",
@@ -148,6 +151,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		if s.adminToken != "" && strings.HasPrefix(r.URL.Path, "/v1/admin/") {
 			adminToken := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
 			if adminToken != s.adminToken {
+				s.log().Debug("admin token rejected", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 				s.writeErrorReq(w, r, http.StatusForbidden, apiError{
 					status:  http.StatusForbidden,
 					code:    "forbidden",

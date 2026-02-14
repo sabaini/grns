@@ -76,10 +76,14 @@ func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *s
 	}
 
 	var bs blobstore.BlobStore
+	blobStoreSource := "injected"
+	blobStoreRoot := ""
 	if len(blobStores) > 0 {
 		bs = blobStores[0]
 	} else {
 		fallbackRoot := filepath.Join(os.TempDir(), defaultBlobRootDir)
+		blobStoreSource = "fallback"
+		blobStoreRoot = fallbackRoot
 		cas, err := blobstore.NewLocalCAS(fallbackRoot)
 		if err == nil {
 			bs = cas
@@ -120,6 +124,24 @@ func New(addr string, taskStore store.TaskStore, projectPrefix string, logger *s
 	if authStore, ok := any(taskStore).(store.AuthStore); ok {
 		srv.authService = NewAuthService(authStore)
 	}
+
+	fields := []any{
+		"addr", addr,
+		"project_prefix", projectPrefix,
+		"attachment_service_enabled", attachmentService != nil,
+		"git_ref_service_enabled", gitRefService != nil,
+		"auth_service_enabled", srv.authService != nil,
+		"api_token_configured", srv.apiToken != "",
+		"admin_token_configured", srv.adminToken != "",
+		"require_auth_with_users", srv.requireAuthWithUsers,
+		"blob_store_source", blobStoreSource,
+		"blob_store_enabled", bs != nil,
+	}
+	if blobStoreRoot != "" {
+		fields = append(fields, "blob_store_root", blobStoreRoot)
+	}
+	logger.Debug("server initialized", fields...)
+
 	return srv
 }
 
@@ -137,6 +159,15 @@ func (s *Server) ConfigureAttachmentOptions(opts AttachmentOptions) {
 	if s.attachmentService != nil {
 		s.attachmentService.ConfigurePolicy(opts.AllowedMediaTypes, opts.RejectMediaTypeMismatch, opts.GCBatchSize)
 	}
+	if s.logger != nil {
+		s.log().Debug("attachment options configured",
+			"max_upload_bytes", s.attachmentUploadMaxBody,
+			"multipart_max_memory", s.attachmentMultipartMemory,
+			"allowed_media_type_count", len(opts.AllowedMediaTypes),
+			"reject_media_type_mismatch", opts.RejectMediaTypeMismatch,
+			"gc_batch_size", opts.GCBatchSize,
+		)
+	}
 }
 
 // SetDBPath records the active database path for runtime metadata endpoints.
@@ -149,7 +180,13 @@ func (s *Server) SetDBPath(path string) {
 
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
-	s.log().Info("starting server", "addr", s.addr)
+	s.log().Info("starting server",
+		"addr", s.addr,
+		"project_prefix", s.projectPrefix,
+		"api_token_configured", s.apiToken != "",
+		"admin_token_configured", s.adminToken != "",
+		"require_auth_with_users", s.requireAuthWithUsers,
+	)
 	server := &http.Server{
 		Addr:              s.addr,
 		Handler:           s.routes(),
@@ -217,6 +254,7 @@ func (s *Server) acquireLimiter(limiter chan struct{}, w http.ResponseWriter, r 
 	case limiter <- struct{}{}:
 		return true
 	default:
+		s.log().Debug("request concurrency limited", "limiter", name, "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 		err := apiError{
 			status:  http.StatusTooManyRequests,
 			code:    "resource_exhausted",

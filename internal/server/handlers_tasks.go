@@ -53,6 +53,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.log().Debug("tasks closed", "count", len(req.IDs), "commit_linked", commit != "", "annotated_refs", annotated)
 	resp := map[string]any{"ids": req.IDs}
 	if commit != "" {
 		resp["commit"] = commit
@@ -76,6 +77,7 @@ func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("tasks reopened", "count", len(ids))
 	s.writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
@@ -96,6 +98,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("ready tasks listed", "count", len(responses), "limit", limit)
 	s.writeJSON(w, http.StatusOK, responses)
 }
 
@@ -136,6 +139,7 @@ func (s *Server) handleStale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("stale tasks listed", "count", len(responses), "days", days, "status_count", len(statuses), "limit", limit)
 	s.writeJSON(w, http.StatusOK, responses)
 }
 
@@ -155,6 +159,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("task created", "task_id", resp.Task.ID, "project", resp.Task.Project, "label_count", len(resp.Labels), "dep_count", len(resp.Deps))
 	s.writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -174,6 +179,7 @@ func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("tasks batch created", "requested", len(reqs), "created", len(responses))
 	s.writeJSON(w, http.StatusCreated, responses)
 }
 
@@ -212,6 +218,7 @@ func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("tasks fetched", "requested", len(ids), "returned", len(responses))
 	s.writeJSON(w, http.StatusOK, responses)
 }
 
@@ -236,6 +243,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("task updated", "task_id", resp.Task.ID, "status", resp.Task.Status, "priority", resp.Task.Priority)
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
@@ -264,5 +272,6 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("tasks listed", "count", len(responses), "search", filter.SearchQuery != "", "spec_regex", filter.SpecRegex != "", "limit", filter.Limit, "offset", filter.Offset)
 	s.writeJSON(w, http.StatusOK, responses)
 }

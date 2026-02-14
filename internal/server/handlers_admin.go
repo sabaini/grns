@@ -34,6 +34,7 @@ func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cutoff := time.Now().UTC().AddDate(0, 0, -req.OlderThanDays)
+	s.log().Debug("admin cleanup requested", "project", project, "older_than_days", req.OlderThanDays, "dry_run", req.DryRun)
 	result, err := s.store.CleanupClosedTasks(r.Context(), project, cutoff, req.DryRun)
 	if err != nil {
 		s.writeStoreError(w, r, err)
@@ -49,6 +50,7 @@ func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 		resp.TaskIDs = []string{}
 	}
 
+	s.log().Debug("admin cleanup complete", "count", resp.Count, "dry_run", resp.DryRun)
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
@@ -67,6 +69,7 @@ func (s *Server) handleAdminGCBlobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("blob gc requested", "batch_size", req.BatchSize, "dry_run", req.DryRun)
 	result, err := s.attachmentService.GCBlobs(r.Context(), req.BatchSize, !req.DryRun)
 	if err != nil {
 		s.writeServiceError(w, r, err)
@@ -80,5 +83,6 @@ func (s *Server) handleAdminGCBlobs(w http.ResponseWriter, r *http.Request) {
 		ReclaimedBytes: result.ReclaimedBytes,
 		DryRun:         result.DryRun,
 	}
+	s.log().Debug("blob gc complete", "candidates", resp.CandidateCount, "deleted", resp.DeletedCount, "failed", resp.FailedCount, "reclaimed_bytes", resp.ReclaimedBytes, "dry_run", resp.DryRun)
 	s.writeJSON(w, http.StatusOK, resp)
 }

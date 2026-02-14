@@ -92,6 +92,7 @@ func (s *Server) handleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	s.log().Debug("attachment created", "task_id", taskID, "attachment_id", attachment.ID, "kind", attachment.Kind, "source_type", attachment.SourceType)
 	s.writeJSON(w, http.StatusCreated, attachment)
 }
 
@@ -131,6 +132,7 @@ func (s *Server) handleCreateTaskAttachmentLink(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	s.log().Debug("attachment link created", "task_id", taskID, "attachment_id", attachment.ID, "kind", attachment.Kind)
 	s.writeJSON(w, http.StatusCreated, attachment)
 }
 
@@ -158,6 +160,7 @@ func (s *Server) handleListTaskAttachments(w http.ResponseWriter, r *http.Reques
 		attachments = []models.Attachment{}
 	}
 
+	s.log().Debug("task attachments listed", "task_id", taskID, "count", len(attachments))
 	s.writeJSON(w, http.StatusOK, attachments)
 }
 
@@ -183,6 +186,7 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("attachment fetched", "attachment_id", attachmentID, "task_id", attachment.TaskID)
 	s.writeJSON(w, http.StatusOK, attachment)
 }
 
@@ -214,9 +218,12 @@ func (s *Server) handleGetAttachmentContent(w http.ResponseWriter, r *http.Reque
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", content.SizeBytes))
 	}
 	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, content.Reader); err != nil {
+	written, err := io.Copy(w, content.Reader)
+	if err != nil {
 		s.log().Warn("stream attachment content", "attachment_id", attachmentID, "error", err)
+		return
 	}
+	s.log().Debug("attachment content streamed", "attachment_id", attachmentID, "bytes", written)
 }
 
 func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +246,7 @@ func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.log().Debug("attachment deleted", "attachment_id", attachmentID)
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": attachmentID})
 }
 

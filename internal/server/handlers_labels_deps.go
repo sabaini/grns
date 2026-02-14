@@ -51,6 +51,7 @@ func (s *Server) handleDepTree(w http.ResponseWriter, r *http.Request) {
 		nodes = []models.DepTreeNode{}
 	}
 
+	s.log().Debug("dependency tree listed", "root_id", id, "node_count", len(nodes))
 	s.writeJSON(w, http.StatusOK, api.DepTreeResponse{
 		RootID: id,
 		Nodes:  nodes,
@@ -79,6 +80,7 @@ func (s *Server) handleDeps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("dependency added", "child_id", childID, "parent_id", parentID, "type", depType)
 	s.writeJSON(w, http.StatusOK, map[string]any{"child_id": childID, "parent_id": parentID, "type": depType})
 }
 
@@ -94,6 +96,7 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("labels listed", "project", project, "count", len(labels))
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
@@ -118,6 +121,7 @@ func (s *Server) handleListTaskLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("task labels listed", "task_id", id, "count", len(labels))
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
@@ -151,6 +155,7 @@ func (s *Server) handleAddTaskLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("task labels added", "task_id", id, "requested_count", len(labelsReq), "result_count", len(labels))
 	s.writeJSON(w, http.StatusOK, labels)
 }
 
@@ -166,5 +171,6 @@ func (s *Server) handleRemoveTaskLabels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.log().Debug("task labels removed", "task_id", id, "requested_count", len(labelsReq), "result_count", len(labels))
 	s.writeJSON(w, http.StatusOK, labels)
 }

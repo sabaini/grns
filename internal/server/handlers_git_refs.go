@@ -35,6 +35,7 @@ func (s *Server) handleCreateTaskGitRef(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.log().Debug("git ref created", "task_id", taskID, "ref_id", ref.ID, "relation", ref.Relation, "object_type", ref.ObjectType)
 	s.writeJSON(w, http.StatusCreated, ref)
 }
 
@@ -62,6 +63,7 @@ func (s *Server) handleListTaskGitRefs(w http.ResponseWriter, r *http.Request) {
 		refs = []models.TaskGitRef{}
 	}
 
+	s.log().Debug("task git refs listed", "task_id", taskID, "count", len(refs))
 	s.writeJSON(w, http.StatusOK, refs)
 }
 
@@ -87,6 +89,7 @@ func (s *Server) handleGetTaskGitRef(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.log().Debug("git ref fetched", "ref_id", refID, "task_id", ref.TaskID)
 	s.writeJSON(w, http.StatusOK, ref)
 }
 
@@ -111,6 +114,7 @@ func (s *Server) handleDeleteTaskGitRef(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.log().Debug("git ref deleted", "ref_id", refID)
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": refID})
 }
 

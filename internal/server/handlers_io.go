@@ -33,6 +33,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 
 	offset := 0
+	total := 0
+	pages := 0
+	s.log().Debug("export request")
 	for {
 		records, err := s.service.ExportPage(r.Context(), exportPageSize, offset)
 		if err != nil {
@@ -40,14 +43,17 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(records) == 0 {
+			s.log().Debug("export complete", "records", total, "pages", pages)
 			return
 		}
 
+		pages++
 		for _, record := range records {
 			if err := enc.Encode(record); err != nil {
 				s.logExportError(r, "encode", offset, record.Task.ID, err)
 				return
 			}
+			total++
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
