@@ -19,7 +19,11 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			warning, err := configureLoggerForCLI(logLevel)
+			configuredLevel := ""
+			if cfg != nil {
+				configuredLevel = cfg.LogLevel
+			}
+			warning, err := configureLoggerForCLI(logLevel, configuredLevel)
 			if err != nil {
 				return err
 			}
@@ -32,7 +36,7 @@ func newRootCmd(cfg *config.Config) *cobra.Command {
 
 	cmd.Version = version
 	cmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output JSON")
-	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level: debug|info|warn|error (overrides GRNS_LOG_LEVEL)")
+	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level: debug|info|warn|error (overrides GRNS_LOG_LEVEL and log_level config)")
 
 	cmd.AddCommand(
 		newSrvCmd(cfg),

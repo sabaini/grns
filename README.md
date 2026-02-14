@@ -101,7 +101,8 @@ For `commit`, `blob`, and `tree`, the object value must be a 40-character lowerc
 The CLI auto-spawns a local server process on first use if none is running.
 
 - Default bind address: `127.0.0.1:7333`
-- Server log: `$TMPDIR/grns/server.log`
+- Server log (auto-spawned/local CLI mode): `$TMPDIR/grns/server.log`
+- Daemon log (service mode, e.g. snap `grns.daemon`): syslog/journald
 - Run foreground: `grns srv`
 - Stop: `pkill -f "grns srv"`
 
@@ -166,6 +167,7 @@ Supported config keys:
 - `project_prefix` (default: `gr`; used as `{project}` for `/v1/projects/{project}/...` API routes)
 - `api_url` (default: `http://127.0.0.1:7333`)
 - `db_path` (default: `.grns.db` in workspace)
+- `log_level` (default: `debug`; valid values: `debug`, `info`, `warn`, `error`)
 - `attachments.max_upload_bytes` (default: `104857600`)
 - `attachments.multipart_max_memory` (default: `8388608`)
 - `attachments.allowed_media_types` (default: empty)
@@ -177,12 +179,14 @@ Supported config keys:
 - `GRNS_API_URL`
 - `GRNS_DB`
 - `GRNS_HTTP_TIMEOUT` (client timeout, e.g. `30s` or `30`)
-- `GRNS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; defaults to `info`)
+- `GRNS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; defaults to `debug`; overrides `log_level`; applies to server/daemon logs)
 - `GRNS_CONFIG_DIR` (override config file location; uses `$GRNS_CONFIG_DIR/.grns.toml`)
 - `GRNS_TRUST_PROJECT_CONFIG=true` (opt in to loading `./.grns.toml`; CLI prints a warning when this trusted project config is used)
 - `GRNS_DB_MAX_OPEN_CONNS`, `GRNS_DB_MAX_IDLE_CONNS`, `GRNS_DB_CONN_MAX_LIFETIME` (optional SQLite pool tuning)
 - `GRNS_ATTACH_ALLOWED_MEDIA_TYPES` (comma-separated MIME types to allow for uploads)
 - `GRNS_ATTACH_REJECT_MEDIA_TYPE_MISMATCH` (reject uploads where declared MIME differs from sniffed; default `true`)
+
+Log level precedence: `--log-level` > `GRNS_LOG_LEVEL` > `log_level` in config > `debug`.
 
 ### Security-related environment variables
 
@@ -424,7 +428,7 @@ just lint
 
 Global flags:
 - `--json`
-- `--log-level debug|info|warn|error` (overrides `GRNS_LOG_LEVEL`)
+- `--log-level debug|info|warn|error` (overrides `GRNS_LOG_LEVEL` and `log_level` config)
 
 Run command help for full flags:
 
@@ -458,7 +462,9 @@ See `docs/snap.md` for daemon setup and runtime details.
 - Check if the server is running: `curl http://127.0.0.1:7333/health`
 - Verify `GRNS_API_URL` points to the right address
 - Try starting the server manually: `grns srv`
-- Check server logs: `$TMPDIR/grns/server.log`
+- Check server logs:
+  - auto-spawned/local CLI mode: `$TMPDIR/grns/server.log`
+  - daemon/service mode (including snap `grns.daemon`): syslog/journald
 
 **Port already in use:**
 - Kill stale server: `pkill -f "grns srv"`

@@ -17,6 +17,9 @@ func TestDefault(t *testing.T) {
 	if cfg.DBPath != "" {
 		t.Fatalf("expected empty db path, got %q", cfg.DBPath)
 	}
+	if cfg.LogLevel != DefaultLogLevel {
+		t.Fatalf("expected default log level %q, got %q", DefaultLogLevel, cfg.LogLevel)
+	}
 	if cfg.Attachments.MaxUploadBytes != DefaultAttachmentMaxUploadBytes {
 		t.Fatalf("expected attachment max upload default %d, got %d", DefaultAttachmentMaxUploadBytes, cfg.Attachments.MaxUploadBytes)
 	}
@@ -36,6 +39,7 @@ func TestLoadFile(t *testing.T) {
 	path := filepath.Join(dir, ".grns.toml")
 	if err := os.WriteFile(path, []byte(`project_prefix = "xx"
 api_url = "http://localhost:9999"
+log_level = "warn"
 `), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -49,6 +53,9 @@ api_url = "http://localhost:9999"
 	}
 	if cfg.APIURL != "http://localhost:9999" {
 		t.Fatalf("expected api_url 'http://localhost:9999', got %q", cfg.APIURL)
+	}
+	if cfg.LogLevel != "warn" {
+		t.Fatalf("expected log_level 'warn', got %q", cfg.LogLevel)
 	}
 }
 
@@ -67,6 +74,7 @@ func TestIsAllowedKey(t *testing.T) {
 		"project_prefix",
 		"api_url",
 		"db_path",
+		"log_level",
 		"attachments.max_upload_bytes",
 		"attachments.multipart_max_memory",
 		"attachments.allowed_media_types",
@@ -87,6 +95,7 @@ func TestGetKey(t *testing.T) {
 		ProjectPrefix: "xx",
 		APIURL:        "http://test:1234",
 		DBPath:        "/tmp/test.db",
+		LogLevel:      "warn",
 		Attachments: AttachmentConfig{
 			MaxUploadBytes:          123,
 			MultipartMaxMemory:      456,
@@ -107,6 +116,10 @@ func TestGetKey(t *testing.T) {
 	val, err = cfg.Get("db_path")
 	if err != nil || val != "/tmp/test.db" {
 		t.Fatalf("expected db_path, got %q (err: %v)", val, err)
+	}
+	val, err = cfg.Get("log_level")
+	if err != nil || val != "warn" {
+		t.Fatalf("expected log_level, got %q (err: %v)", val, err)
 	}
 	val, err = cfg.Get("attachments.max_upload_bytes")
 	if err != nil || val != "123" {
@@ -168,6 +181,21 @@ func TestSetKeyUpdatesExisting(t *testing.T) {
 	}
 	if cfg.APIURL != "http://keep" {
 		t.Fatalf("expected preserved api_url 'http://keep', got %q", cfg.APIURL)
+	}
+}
+
+func TestSetKeyLogLevel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.toml")
+	if err := SetKey(path, "log_level", "error"); err != nil {
+		t.Fatalf("set log_level: %v", err)
+	}
+
+	cfg := Default()
+	if err := loadFile(path, &cfg); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LogLevel != "error" {
+		t.Fatalf("expected log_level 'error', got %q", cfg.LogLevel)
 	}
 }
 
@@ -268,6 +296,37 @@ func TestEnvOverrides(t *testing.T) {
 	}
 	if cfg.DBPath != "/tmp/override.db" {
 		t.Fatalf("expected env override for DB path, got %q", cfg.DBPath)
+	}
+}
+
+func TestLoadFallsBackToDefaultLogLevelWhenConfiguredEmpty(t *testing.T) {
+	homeDir := t.TempDir()
+	workspace := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(homeDir, ".grns.toml"), []byte("log_level = \"\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir workspace: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("GRNS_TRUST_PROJECT_CONFIG", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LogLevel != DefaultLogLevel {
+		t.Fatalf("expected default log level %q, got %q", DefaultLogLevel, cfg.LogLevel)
 	}
 }
 

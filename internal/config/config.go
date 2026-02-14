@@ -16,6 +16,7 @@ const (
 	DefaultProjectPrefix = "gr"
 	DefaultAPIURL        = "http://127.0.0.1:7333"
 	DefaultDBFileName    = ".grns.db"
+	DefaultLogLevel      = "debug"
 
 	DefaultAttachmentMaxUploadBytes  int64 = 100 * 1024 * 1024
 	DefaultAttachmentMultipartMemory int64 = 8 * 1024 * 1024
@@ -46,6 +47,7 @@ type Config struct {
 	ProjectPrefix            string           `toml:"project_prefix"`
 	APIURL                   string           `toml:"api_url"`
 	DBPath                   string           `toml:"db_path"`
+	LogLevel                 string           `toml:"log_level"`
 	Attachments              AttachmentConfig `toml:"attachments"`
 	TrustedProjectConfigPath string           `toml:"-"`
 }
@@ -56,6 +58,7 @@ func Default() Config {
 		ProjectPrefix: DefaultProjectPrefix,
 		APIURL:        DefaultAPIURL,
 		DBPath:        "",
+		LogLevel:      DefaultLogLevel,
 		Attachments: AttachmentConfig{
 			MaxUploadBytes:          DefaultAttachmentMaxUploadBytes,
 			MultipartMaxMemory:      DefaultAttachmentMultipartMemory,
@@ -160,6 +163,7 @@ var allowedKeys = []string{
 	"project_prefix",
 	"api_url",
 	"db_path",
+	"log_level",
 	"attachments.max_upload_bytes",
 	"attachments.multipart_max_memory",
 	"attachments.allowed_media_types",
@@ -191,6 +195,8 @@ func (c *Config) Get(key string) (string, error) {
 		return c.APIURL, nil
 	case "db_path":
 		return c.DBPath, nil
+	case "log_level":
+		return c.LogLevel, nil
 	case "attachments.max_upload_bytes":
 		return strconv.FormatInt(c.Attachments.MaxUploadBytes, 10), nil
 	case "attachments.multipart_max_memory":
@@ -326,6 +332,9 @@ func Load() (*Config, error) {
 		if cwd, err := os.Getwd(); err == nil {
 			cfg.DBPath = filepath.Join(cwd, DefaultDBFileName)
 		}
+	}
+	if strings.TrimSpace(cfg.LogLevel) == "" {
+		cfg.LogLevel = DefaultLogLevel
 	}
 
 	if apiURL := os.Getenv("GRNS_API_URL"); apiURL != "" {
