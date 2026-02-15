@@ -2,11 +2,46 @@
 
 Grns is a lightweight CLI task tracker for agents.
 
-Grns is a lightweight CLI task tracker for agents.
-
 This project exists because I'm not great at multitasking (few people are), and constantly switching between different clanker ("coding agent") sessions absolutely destroys my thinking process. Grns aims to support a workflow where you spec out a larger block of work, decompose it into individual tasks (likely with clanker help), load the tasks into grns and then have one or more clankers work on tasks, hopefull requireing less handholding. 
 
-xxx workflow example
+## Workflow example (spec → parallel work → closeout)
+
+```bash
+# 1) Create an epic and three child tasks
+# (capture returned IDs and reuse them in later commands)
+grns create "Auth rollout" -t epic -p 1 -l auth --json
+# => {"id":"gr-a1b2", ...}
+
+grns create "Add /v1/auth/login endpoint" -t feature -p 1 -l auth --parent gr-a1b2 --json
+# => {"id":"gr-c3d4", ...}
+
+grns create "Wire login form in web UI" -t feature -p 2 -l ui --parent gr-a1b2 --json
+# => {"id":"gr-e5f6", ...}
+
+grns create "Write auth setup docs" -t task -p 2 -l docs --parent gr-a1b2 --json
+# => {"id":"gr-g7h8", ...}
+
+# 2) Make docs depend on both implementation tasks
+grns dep add gr-c3d4 gr-g7h8   # API task blocks docs task
+grns dep add gr-e5f6 gr-g7h8   # UI task blocks docs task
+
+# 3) Ask agents to pull from the ready queue
+grns ready --json
+
+# 4) Agents claim and execute work in parallel
+grns update gr-c3d4 --status in_progress --assignee agent-api --json
+grns update gr-e5f6 --status in_progress --assignee agent-ui --json
+grns close gr-c3d4 --json
+grns close gr-e5f6 --json
+
+# 5) Docs task is now unblocked and shows up in ready
+grns ready --json
+
+# 6) Finalize remaining work and inspect the full set
+grns update gr-g7h8 --status in_progress --assignee agent-docs --json
+grns close gr-g7h8 --json
+grns show gr-a1b2 gr-c3d4 gr-e5f6 gr-g7h8 --json
+```
 
 
 Architecture:
