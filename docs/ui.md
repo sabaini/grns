@@ -64,7 +64,7 @@ Key decisions:
 - Start server explicitly: `grns srv`
 - Open: `http://127.0.0.1:7333/` (or configured `GRNS_API_URL` host)
 
-Note: CLI auto-spawn is command-scoped and not a UI launcher.
+Note: UI requires an explicitly running server (`grns srv` or a managed daemon).
 
 ---
 

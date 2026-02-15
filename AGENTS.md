@@ -10,7 +10,7 @@ Grns is a lightweight CLI issue tracker for agents. Go 1.24, pure-Go SQLite (`mo
 CLI (cmd/grns) → HTTP (api.Client) → Server (internal/server) → Store (internal/store) → SQLite
 ```
 
-- **CLI** auto-spawns a local server process if none is running (`client.go`).
+- **CLI** connects to a running server process (`grns srv` locally, or managed daemon such as snap).
 - **Server** uses Go 1.22+ `ServeMux` patterns (`"GET /v1/projects/{project}/tasks/{id}"`). One handler per route+method.
 - **TaskService** (`task_service.go`) owns validation and business logic. Handlers must not call store directly.
 - **TaskStore** interface (`store/interface.go`) abstracts persistence. The only implementation is SQLite.
@@ -27,7 +27,7 @@ just tidy-check             # go mod tidy -diff (verify go.mod/go.sum are tidy)
 just fmt                    # gofmt -w on all .go files
 just fmt-check              # verify all .go files are formatted
 just test-integration       # build + bats tests/
-just test-smoke             # build + bats subset (autospawn, create_show, admin_cleanup)
+just test-smoke             # build + bats subset (connectivity, create_show, admin_cleanup)
 just test-py                # build + uv run pytest tests_py
 just test-py-concurrency    # build + pytest concurrency & stress tests
 just test-py-stress         # build + GRNS_STRESS=1 pytest stress mixed workload
@@ -59,7 +59,7 @@ Kill stale servers before integration tests: `pkill -f "grns srv"`.
 - All task mutations (create, update, close, reopen) go through `TaskService`, never directly to store from handlers.
 - `decodeJSON` does **not** use `DisallowUnknownFields` — clients may send newer fields.
 - Integration tests are BATS (bash). Helpers in `tests/helpers.bash`, seed data in `tests/data/`.
-- Server logs to `$TMPDIR/grns/server.log` when auto-spawned.
+- Server logs in local mode are from `grns srv` stdout/stderr; daemon/service logs are in syslog/journald.
 
 ## File Hotspots
 

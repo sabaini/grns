@@ -87,7 +87,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 ## Architecture
 ### Single-User Mode (Embedded)
 - CLI communicates with a local `grns` server over REST (default `http://127.0.0.1:7333`).
-- CLI auto-spawns the local server if not running.
+- CLI connects to a running server (manual `grns srv` or managed service such as snap daemon).
 - Server uses an embedded SQLite datastore (WAL mode).
 - No external services required.
 
@@ -135,7 +135,7 @@ We need a fast, CLI-oriented task tracker that supports dependency modeling and 
 - Commands: `create`, `update`, `show`, `list`, `ready`, `stale`, `close`, `reopen`, `dep add`, `label add/remove/list`.
 - Output flags: `--json` (YAML/TOML post‑MVP).
 - Default output: human-readable with stable formatting.
-- CLI auto-spawns the local server when needed.
+- CLI expects a running server (`grns srv` for local dev/test, or snap daemon in snap installs).
 - `create -f` accepts markdown input (front matter + list items) for batch issue creation.
 - `--deps` supports multiple dependencies (comma-separated) with `blocks` as the default type.
 - `list --spec` uses regex matching (case-insensitive RE2).

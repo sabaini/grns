@@ -24,7 +24,7 @@ wait_for_lxc_exec() {
   return 1
 }
 
-@test "snap daemon in LXC reports daemon db path via grns info" {
+@test "snap daemon autostarts in LXC and reports daemon db path via grns info" {
   if [ "${GRNS_RUN_SNAP_LXC_TEST:-0}" != "1" ]; then
     skip "set GRNS_RUN_SNAP_LXC_TEST=1 to enable snap-in-lxc integration test"
   fi
@@ -71,6 +71,8 @@ wait_for_lxc_exec() {
   run lxc exec "$SNAP_LXC_NAME" -- snap install --dangerous /tmp/grns.snap
   [ "$status" -eq 0 ]
 
+  wait_for_lxc_exec "snap services grns | grep -qE '^grns\\.daemon\\s+\\S+\\s+active(\\s|$)'" 120 1
+
   run lxc exec "$SNAP_LXC_NAME" -- snap connect grns:home
   [ "$status" -eq 0 ]
   run lxc exec "$SNAP_LXC_NAME" -- snap connect grns:network
@@ -78,9 +80,6 @@ wait_for_lxc_exec() {
   run lxc exec "$SNAP_LXC_NAME" -- snap connect grns:network-bind
   [ "$status" -eq 0 ]
   run lxc exec "$SNAP_LXC_NAME" -- snap connect grns:removable-media
-  [ "$status" -eq 0 ]
-
-  run lxc exec "$SNAP_LXC_NAME" -- snap start grns.daemon
   [ "$status" -eq 0 ]
 
   wait_for_lxc_exec '/snap/bin/grns info --json >/tmp/grns-info.json' 120 1

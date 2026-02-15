@@ -21,7 +21,7 @@ sudo snap install --dangerous ./grns_*.snap
 ## Commands
 
 - CLI: `grns`
-- Optional daemon service: `grns.daemon`
+- Daemon service (enabled by default): `grns.daemon`
 
 Check installed services:
 
@@ -29,16 +29,18 @@ Check installed services:
 snap services grns
 ```
 
-## Optional always-on service
+## Always-on service (enabled by default)
 
-Enable the daemon (disabled by default):
+The daemon starts automatically after install.
+
+If you stopped it, start it again with:
 
 ```bash
 sudo snap start grns.daemon
 sudo snap services grns
 ```
 
-Disable it:
+Stop it when needed:
 
 ```bash
 sudo snap stop grns.daemon
@@ -96,7 +98,7 @@ sudo snap connect grns:removable-media
 ## Notes
 
 - The CLI app sets `GRNS_CONFIG_DIR=$SNAP_USER_COMMON` so user config is snap-scoped.
-- If `grns.daemon` is running, the CLI connects to it and does not auto-spawn another server.
+- The CLI connects to the server at `GRNS_API_URL`; in snap setups this is typically the running `grns.daemon` service.
 - `grns info` reports the database path of the connected server process (for the daemon this is typically `/var/snap/grns/common/grns.db`).
 
 ## Optional LXC integration test

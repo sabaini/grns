@@ -7,7 +7,7 @@ description: |
 
   This snap ships:
   - grns: the CLI command
-  - grns.daemon: an optional always-on API service (`grns srv`)
+  - grns.daemon: an always-on API service (`grns srv`) enabled by default
 grade: devel
 confinement: strict
 
@@ -25,7 +25,6 @@ apps:
   daemon:
     command: bin/grns srv
     daemon: simple
-    install-mode: disable
     restart-condition: on-failure
     plugs:
       - network

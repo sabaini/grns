@@ -18,6 +18,11 @@ CLI (cmd/grns) -> HTTP (internal/api.Client) -> Server (internal/server) -> Stor
 ## Quickstart
 
 ```bash
+# Terminal 1: start the server
+grns srv
+
+# Terminal 2: run CLI commands
+
 # Create a task
 grns create "Add auth flow" -t feature -p 1 -l auth --json
 
@@ -98,13 +103,25 @@ For `commit`, `blob`, and `tree`, the object value must be a 40-character lowerc
 
 ## Server
 
-The CLI auto-spawns a local server process on first use if none is running.
+The CLI connects to a running `grns` server.
+
+For local development/testing, start it manually:
+
+```bash
+grns srv
+```
+
+In snap installs, `grns.daemon` is enabled by default after install.
+If needed, you can (re)start it with:
+
+```bash
+sudo snap start grns.daemon
+```
 
 - Default bind address: `127.0.0.1:7333`
-- Server log (auto-spawned/local CLI mode): `$TMPDIR/grns/server.log`
-- Daemon log (service mode, e.g. snap `grns.daemon`): syslog/journald
-- Run foreground: `grns srv`
-- Stop: `pkill -f "grns srv"`
+- Foreground logs (`grns srv`): terminal output
+- Daemon logs (service mode, e.g. snap `grns.daemon`): syslog/journald
+- Stop local server process: `pkill -f "grns srv"`
 
 The server persists between CLI invocations. To force a clean state (e.g. before integration tests), kill the server process.
 
@@ -215,7 +232,7 @@ Error responses are JSON with stable string and numeric codes:
 ### CLI operator/user error guidance model
 
 - CLI prints the primary error message first (user-facing cause).
-- For startup/autospawn failures, CLI prints actionable hints including API URL checks and the server log path when available.
+- For connectivity/startup failures, CLI prints actionable hints (verify `GRNS_API_URL`, start `grns srv`, or start `grns.daemon` in snap).
 - For auth/rate-limit/internal API failures, CLI prints targeted hints (token config, retry/load, inspect server logs).
 - Server `5xx` responses remain sanitized (`"internal error"`) while detailed diagnostics stay in server logs.
 
@@ -451,7 +468,7 @@ sudo snap install --dangerous ./grns_*.snap
 ```
 
 - CLI command: `grns`
-- Optional service (disabled by default): `grns.daemon`
+- Daemon service (enabled by default): `grns.daemon`
 
 See `docs/snap.md` for daemon setup and runtime details.
 
@@ -460,9 +477,10 @@ See `docs/snap.md` for daemon setup and runtime details.
 **"Connection refused" or CLI hangs:**
 - Check if the server is running: `curl http://127.0.0.1:7333/health`
 - Verify `GRNS_API_URL` points to the right address
-- Try starting the server manually: `grns srv`
+- Start the server manually: `grns srv`
+- In snap installs, if daemon is stopped, restart it: `sudo snap start grns.daemon`
 - Check server logs:
-  - auto-spawned/local CLI mode: `$TMPDIR/grns/server.log`
+  - local foreground (`grns srv`): terminal output (or your redirect target)
   - daemon/service mode (including snap `grns.daemon`): syslog/journald
 
 **Port already in use:**
@@ -489,6 +507,6 @@ See `docs/snap.md` for daemon setup and runtime details.
 | [Git References Design](docs/git-refs.md) | Task-to-git linking model |
 | [Error Codes Design](docs/errcode-design.md) | Numeric error code catalog |
 | [Security](docs/security.md) | Auth, config trust, hardening |
-| [Snap Packaging](docs/snap.md) | Build/install snap and optional daemon service |
+| [Snap Packaging](docs/snap.md) | Build/install snap and default-on daemon service |
 | [Messaging Design](docs/messaging.md) | Future multi-agent broker design (not implemented) |
 | [Performance](docs/performance-go.md) | Benchmarks and regression budgets |

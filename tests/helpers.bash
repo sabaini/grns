@@ -14,6 +14,22 @@ setup_test_env() {
     export GRNS_API_URL="http://127.0.0.1:$(get_free_port)"
   fi
   mkdir -p "$BATS_TEST_TMPDIR"
+
+  if [ "${GRNS_TEST_START_SERVER:-1}" = "1" ]; then
+    start_test_server || return 1
+  fi
+}
+
+start_test_server() {
+  if [ -n "${GRNS_TEST_HTTP_PID:-}" ] && kill -0 "$GRNS_TEST_HTTP_PID" 2>/dev/null; then
+    return 0
+  fi
+
+  "$GRNS_BIN" srv >/dev/null 2>&1 &
+  GRNS_TEST_HTTP_PID=$!
+  export GRNS_TEST_HTTP_PID
+
+  wait_for_http_server "$GRNS_API_URL/health" 8
 }
 
 teardown_test_env() {

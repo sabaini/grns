@@ -78,7 +78,7 @@ just compare-stress baseline.json candidate.json
 ## Test Database
 Tests set `GRNS_DB` to a temporary SQLite file under `$BATS_TEST_TMPDIR`.
 
-> Note: SQLite in-memory databases do not persist across separate CLI processes, so we use a temp file for multi-command tests. Once a daemon or single-process mode exists, we can switch to true in-memory testing.
+> Note: SQLite in-memory databases do not persist across separate CLI processes, so we use a temp file for multi-command tests. The BATS helpers start a real server process per test and point it at that temp file.
 
 ## Seed Data
 Seed data lives in `tests/data/*.jsonl`.

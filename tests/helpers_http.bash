@@ -1,13 +1,17 @@
 start_grns_server() {
-  local port
-  port="$(get_free_port)"
-  export GRNS_API_URL="http://127.0.0.1:${port}"
+  if [ -n "${GRNS_TEST_HTTP_PID:-}" ]; then
+    kill "$GRNS_TEST_HTTP_PID" 2>/dev/null || true
+    wait "$GRNS_TEST_HTTP_PID" 2>/dev/null || true
+    unset GRNS_TEST_HTTP_PID
+  fi
 
-  "$GRNS_BIN" srv >/dev/null 2>&1 &
-  GRNS_TEST_HTTP_PID=$!
-  export GRNS_TEST_HTTP_PID
+  if [ -z "${GRNS_API_URL:-}" ]; then
+    local port
+    port="$(get_free_port)"
+    export GRNS_API_URL="http://127.0.0.1:${port}"
+  fi
 
-  wait_for_http_server "$GRNS_API_URL/health" 5
+  start_test_server
 }
 
 wait_for_file() {

@@ -1,14 +1,23 @@
 load 'helpers.bash'
 
-@test "cli autospawns server when api is not running" {
+setup() {
+  export GRNS_TEST_START_SERVER=0
+  setup_test_env
+}
+
+teardown() {
+  teardown_test_env
+  unset GRNS_TEST_START_SERVER
+}
+
+@test "cli errors when api is not running" {
   port="$(get_free_port)"
   export GRNS_API_URL="http://127.0.0.1:${port}"
 
-  run "$GRNS_BIN" create "Autospawn issue" -t task -p 1 --json
-  [ "$status" -eq 0 ]
-
-  id="$(printf '%s' "$output" | json_get id)"
-  [ -n "$id" ]
+  run "$GRNS_BIN" create "Needs server" -t task -p 1 --json
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "hint: ensure a grns server is running at GRNS_API_URL."
+  echo "$output" | grep -q "hint: start local server manually with: grns srv"
 }
 
 @test "cli errors when api url points to non-grns service" {
@@ -23,6 +32,5 @@ load 'helpers.bash'
   run "$GRNS_BIN" create "Bad api" -t task -p 1 --json
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "api error"
-  echo "$output" | grep -q "hint: verify GRNS_API_URL points to a grns server"
-  echo "$output" | grep -q "hint: inspect server log"
+  echo "$output" | grep -q "hint: verify GRNS_API_URL points to a grns server."
 }

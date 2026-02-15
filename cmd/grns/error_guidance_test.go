@@ -1,28 +1,28 @@
 package main
 
 import (
-	"errors"
+	"net"
 	"testing"
 
 	"grns/internal/api"
 )
 
-func TestFormatCLIError_StartupDiagnostics(t *testing.T) {
-	err := &startupDiagnosticsError{
-		apiURL:  "http://127.0.0.1:7333",
-		logPath: "/tmp/grns/server.log",
-		cause:   errors.New("server did not start"),
-	}
-
+func TestFormatCLIError_NetworkGuidance(t *testing.T) {
+	err := &net.DNSError{Err: "dial tcp: connection refused", Name: "127.0.0.1", IsTemporary: true}
 	lines := formatCLIError(err)
-	if len(lines) < 3 {
-		t.Fatalf("expected startup guidance lines, got %v", lines)
+	if !containsLine(lines, "hint: ensure a grns server is running at GRNS_API_URL.") {
+		t.Fatalf("expected connectivity guidance, got %v", lines)
 	}
-	if lines[0] == "" {
-		t.Fatalf("expected primary error message, got %v", lines)
+	if !containsLine(lines, "hint: start local server manually with: grns srv") {
+		t.Fatalf("expected manual-start guidance, got %v", lines)
 	}
-	if !containsLine(lines, "hint: inspect server log: /tmp/grns/server.log") {
-		t.Fatalf("expected log-path guidance, got %v", lines)
+}
+
+func TestFormatCLIError_APIUnknownServiceGuidance(t *testing.T) {
+	err := &api.APIError{Status: 404, Message: "api error: 404 Not Found"}
+	lines := formatCLIError(err)
+	if !containsLine(lines, "hint: verify GRNS_API_URL points to a grns server.") {
+		t.Fatalf("expected api-url guidance, got %v", lines)
 	}
 }
 
