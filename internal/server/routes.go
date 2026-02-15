@@ -69,6 +69,10 @@ func (s *Server) routes() http.Handler {
 	// Admin.
 	mux.HandleFunc("POST /v1/admin/cleanup", s.handleAdminCleanup)
 	mux.HandleFunc("POST /v1/admin/gc-blobs", s.handleAdminGCBlobs)
+	mux.HandleFunc("POST /v1/admin/users", s.handleAdminCreateUser)
+	mux.HandleFunc("GET /v1/admin/users", s.handleAdminListUsers)
+	mux.HandleFunc("PATCH /v1/admin/users/{username}", s.handleAdminSetUserDisabled)
+	mux.HandleFunc("DELETE /v1/admin/users/{username}", s.handleAdminDeleteUser)
 
 	// Project-scoped dependencies and labels.
 	mux.HandleFunc("POST /v1/projects/{project}/deps", s.handleDeps)

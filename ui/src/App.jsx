@@ -1147,7 +1147,11 @@ export default function App() {
               </div>
               <div>
                 <strong>Parent:</strong>{' '}
-                {taskDetail.parent_id ? <a href={`#/tasks/${taskDetail.parent_id}`}>{taskDetail.parent_id}</a> : '—'}
+                {taskDetail.parent_id ? (
+                  <a href={buildHash(`/tasks/${taskDetail.parent_id}`, route.params)}>{taskDetail.parent_id}</a>
+                ) : (
+                  '—'
+                )}
               </div>
               <div>
                 <strong>Spec:</strong> {taskDetail.spec_id || '—'}
@@ -1221,7 +1225,8 @@ export default function App() {
                 <ul className="dep-list">
                   {deps.map((dep) => (
                     <li key={`${dep.parent_id}-${dep.type}`}>
-                      <a href={`#/tasks/${dep.parent_id}`}>{dep.parent_id}</a> <span className="meta">({dep.type})</span>
+                      <a href={buildHash(`/tasks/${dep.parent_id}`, route.params)}>{dep.parent_id}</a>{" "}
+                      <span className="meta">({dep.type})</span>
                     </li>
                   ))}
                 </ul>

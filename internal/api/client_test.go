@@ -270,6 +270,63 @@ func TestClientAttachmentMethods(t *testing.T) {
 	}
 }
 
+func TestClientAdminUsers(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/users":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"au-0001","username":"admin","role":"admin","disabled":false,"created_at":"2026-02-15T00:00:00Z","updated_at":"2026-02-15T00:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/users":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"au-0001","username":"admin","role":"admin","disabled":false,"created_at":"2026-02-15T00:00:00Z","updated_at":"2026-02-15T00:00:00Z"}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/admin/users/admin":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"au-0001","username":"admin","role":"admin","disabled":true,"created_at":"2026-02-15T00:00:00Z","updated_at":"2026-02-15T00:01:00Z"}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/admin/users/admin":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"username":"admin","deleted":true}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+		}
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL)
+
+	created, err := client.AdminUserAdd(context.Background(), AdminUserCreateRequest{Username: "admin", Password: "password-123"})
+	if err != nil {
+		t.Fatalf("AdminUserAdd: %v", err)
+	}
+	if created.ID != "au-0001" || created.Username != "admin" {
+		t.Fatalf("unexpected created user: %#v", created)
+	}
+
+	users, err := client.AdminUserList(context.Background())
+	if err != nil {
+		t.Fatalf("AdminUserList: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "admin" {
+		t.Fatalf("unexpected users: %#v", users)
+	}
+
+	updated, err := client.AdminUserSetDisabled(context.Background(), "admin", true)
+	if err != nil {
+		t.Fatalf("AdminUserSetDisabled: %v", err)
+	}
+	if !updated.Disabled {
+		t.Fatalf("expected updated user to be disabled: %#v", updated)
+	}
+
+	deleted, err := client.AdminUserDelete(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("AdminUserDelete: %v", err)
+	}
+	if !deleted.Deleted || deleted.Username != "admin" {
+		t.Fatalf("unexpected delete response: %#v", deleted)
+	}
+}
+
 func TestClientRetryPolicy_TransportErrors(t *testing.T) {
 	origBase := retryBaseDelay
 	origMax := retryMaxDelay

@@ -185,6 +185,75 @@ func (a *AuthService) RevokeSessionToken(ctx context.Context, token string, now 
 	return a.store.RevokeSessionByTokenHash(ctx, hashSessionToken(token), now)
 }
 
+func (a *AuthService) CreateAdminUser(ctx context.Context, username, password string, now time.Time) (*store.AuthUser, error) {
+	if a == nil || a.store == nil {
+		return nil, fmt.Errorf("auth store is required")
+	}
+
+	normalized, err := internalauth.NormalizeUsername(username)
+	if err != nil {
+		return nil, err
+	}
+	passwordHash, err := internalauth.HashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+
+	created, err := a.store.CreateAdminUser(ctx, normalized, passwordHash, now)
+	if err != nil {
+		return nil, err
+	}
+	a.InvalidateAuthRequiredCache()
+	return created, nil
+}
+
+func (a *AuthService) ListUsers(ctx context.Context) ([]store.AuthUser, error) {
+	if a == nil || a.store == nil {
+		return nil, fmt.Errorf("auth store is required")
+	}
+	return a.store.ListUsers(ctx)
+}
+
+func (a *AuthService) SetUserDisabled(ctx context.Context, username string, disabled bool, now time.Time) (*store.AuthUser, error) {
+	if a == nil || a.store == nil {
+		return nil, fmt.Errorf("auth store is required")
+	}
+
+	normalized, err := internalauth.NormalizeUsername(username)
+	if err != nil {
+		return nil, err
+	}
+
+	updated, err := a.store.SetUserDisabled(ctx, normalized, disabled, now)
+	if err != nil {
+		return nil, err
+	}
+	if updated != nil {
+		a.InvalidateAuthRequiredCache()
+	}
+	return updated, nil
+}
+
+func (a *AuthService) DeleteUser(ctx context.Context, username string) (bool, error) {
+	if a == nil || a.store == nil {
+		return false, fmt.Errorf("auth store is required")
+	}
+
+	normalized, err := internalauth.NormalizeUsername(username)
+	if err != nil {
+		return false, err
+	}
+
+	deleted, err := a.store.DeleteUser(ctx, normalized)
+	if err != nil {
+		return false, err
+	}
+	if deleted {
+		a.InvalidateAuthRequiredCache()
+	}
+	return deleted, nil
+}
+
 func hashSessionToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])

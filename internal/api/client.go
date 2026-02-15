@@ -194,6 +194,113 @@ func (c *Client) AdminCleanup(ctx context.Context, req CleanupRequest, confirm b
 	return resp, err
 }
 
+// AdminUserAdd provisions one local admin user.
+func (c *Client) AdminUserAdd(ctx context.Context, req AdminUserCreateRequest) (AdminUser, error) {
+	var resp AdminUser
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return resp, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/admin/users", bytes.NewReader(payload))
+	if err != nil {
+		return resp, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+// AdminUserList lists provisioned local admin users.
+func (c *Client) AdminUserList(ctx context.Context) ([]AdminUser, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/admin/users", nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return nil, decodeError(httpResp)
+	}
+
+	var users []AdminUser
+	if err := json.NewDecoder(httpResp.Body).Decode(&users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// AdminUserSetDisabled enables or disables one local admin user.
+func (c *Client) AdminUserSetDisabled(ctx context.Context, username string, disabled bool) (AdminUser, error) {
+	var resp AdminUser
+	payload, err := json.Marshal(AdminUserSetDisabledRequest{Disabled: disabled})
+	if err != nil {
+		return resp, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+"/v1/admin/users/"+url.PathEscape(username), bytes.NewReader(payload))
+	if err != nil {
+		return resp, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+// AdminUserDelete deletes one local admin user.
+func (c *Client) AdminUserDelete(ctx context.Context, username string) (AdminUserDeleteResponse, error) {
+	var resp AdminUserDeleteResponse
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v1/admin/users/"+url.PathEscape(username), nil)
+	if err != nil {
+		return resp, err
+	}
+	c.setAuthHeader(httpReq)
+	c.setAdminHeader(httpReq)
+
+	httpResp, err := c.http.Do(httpReq)
+	if err != nil {
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		return resp, decodeError(httpResp)
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
 // Import sends an import request.
 func (c *Client) Import(ctx context.Context, req ImportRequest) (ImportResponse, error) {
 	var resp ImportResponse

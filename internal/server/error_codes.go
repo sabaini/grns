@@ -23,6 +23,7 @@ const (
 	ErrCodeDependencyNotFound = 2002
 	ErrCodeAttachmentNotFound = 2003
 	ErrCodeGitRefNotFound     = 2004
+	ErrCodeUserNotFound       = 2005
 	ErrCodeTaskIDExists       = 2101
 	ErrCodeConflict           = 2102
 

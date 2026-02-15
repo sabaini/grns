@@ -151,6 +151,29 @@ describe('App list behavior', () => {
     });
   });
 
+  it('preserves project query params in detail links', async () => {
+    api.getTask.mockResolvedValueOnce({
+      id: 'xy-aa11',
+      title: 'Scoped task',
+      status: 'open',
+      type: 'task',
+      priority: 2,
+      parent_id: 'xy-bb22',
+      labels: [],
+      deps: [{ parent_id: 'xy-cc33', type: 'blocks' }],
+      created_at: '2026-02-09T12:00:00Z',
+      updated_at: '2026-02-09T12:00:00Z',
+    });
+
+    window.location.hash = '#/tasks/xy-aa11?project=xy';
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Task detail' });
+
+    expect(screen.getByRole('link', { name: 'xy-bb22' }).getAttribute('href')).toBe('#/tasks/xy-bb22?project=xy');
+    expect(screen.getByRole('link', { name: 'xy-cc33' }).getAttribute('href')).toBe('#/tasks/xy-cc33?project=xy');
+  });
+
   it('bulk close calls API with selected ids', async () => {
     const user = userEvent.setup();
     await renderListApp();

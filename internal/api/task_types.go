@@ -1,6 +1,10 @@
 package api
 
-import "grns/internal/models"
+import (
+	"time"
+
+	"grns/internal/models"
+)
 
 // TaskCreateRequest defines the payload for creating a task.
 type TaskCreateRequest struct {
@@ -61,6 +65,33 @@ type AuthMeResponse struct {
 	Username      string `json:"username,omitempty"`
 	Role          string `json:"role,omitempty"`
 	AuthType      string `json:"auth_type,omitempty"`
+}
+
+// AdminUser is one provisioned local admin account.
+type AdminUser struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	Disabled  bool      `json:"disabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AdminUserCreateRequest creates one local admin account.
+type AdminUserCreateRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// AdminUserSetDisabledRequest updates enabled/disabled state for one user.
+type AdminUserSetDisabledRequest struct {
+	Disabled bool `json:"disabled"`
+}
+
+// AdminUserDeleteResponse reports one delete result.
+type AdminUserDeleteResponse struct {
+	Username string `json:"username"`
+	Deleted  bool   `json:"deleted"`
 }
 
 // DepTreeResponse wraps the dependency tree output.
